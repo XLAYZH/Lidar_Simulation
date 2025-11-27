@@ -2,20 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import S_plot_style as plot_style
 
 # 导入前序模块
 from A_lidar_params import params
 from B_atmosphere_model import AtmosphereModel
-
-# 设置绘图字体
-plt.rcParams['mathtext.fontset'] = 'stix'
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.serif'] = 'Times New Roman'
-zh_font_path = 'C:/Windows/Fonts/simhei.ttf'
-if __import__('os').path.exists(zh_font_path):
-    zh_font = fm.FontProperties(fname=zh_font_path)
-else:
-    zh_font = fm.FontProperties()
 
 
 class LidarPhysics:
@@ -115,13 +106,11 @@ if __name__ == "__main__":
     t_axis, p_profile = physics.get_pulse_power_profile()
 
     plt.figure(figsize=(8, 5))
-    plt.plot(t_axis * 1e9, p_profile, color='tab:red', linewidth=2)
-    plt.xlabel("时间 (ns)", fontproperties=zh_font)
-    plt.ylabel("功率 (W)", fontproperties=zh_font)
-    plt.title("高斯脉冲时域分布模型", fontproperties=zh_font)
-    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.plot(t_axis * 1e9, p_profile, color='tab:red')
+    plt.xlabel("时间 ($ns$)", fontproperties=plot_style.style.zh_font)
+    plt.ylabel("功率 ($W$)", fontproperties=plot_style.style.zh_font)
+    plt.title("高斯脉冲时域分布模型", fontproperties=plot_style.style.zh_font)
     plt.xlim(-1000, 1000)
-    plt.tight_layout()
     plt.show()
 
     # ==========================================
@@ -148,9 +137,9 @@ if __name__ == "__main__":
     # linewidth 设细一点，以便看清高频震荡的包络
     ax.plot(dist_axis, i_h_uA, color='blue', linewidth=0.3)
 
-    ax.set_xlabel("距离 (m)", fontproperties=zh_font)
-    ax.set_ylabel("外差信号 ($\u00B5 A$)", fontproperties=zh_font)  # 单位改为 uA
-    ax.set_title("时域外差电流信号", fontproperties=zh_font)
+    ax.set_xlabel("距离 ($m$)", fontproperties=plot_style.style.zh_font)
+    ax.set_ylabel("外差信号 ($\u00B5 A$)", fontproperties=plot_style.style.zh_font)  # 单位改为 uA
+    ax.set_title("时域外差电流信号", fontproperties=plot_style.style.zh_font)
 
     ax.set_xlim(0, 4000)
     ax.set_ylim(-ylim_val, ylim_val)  # 动态设置范围，确保波形充满画面

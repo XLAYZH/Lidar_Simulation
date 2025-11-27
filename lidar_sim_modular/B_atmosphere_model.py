@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import quad
 from A_lidar_params import params  # 导入参数模块
+import S_plot_style as plot_style
 
 
 class AtmosphereModel:
@@ -78,20 +79,6 @@ class AtmosphereModel:
 
 # --- 独立验证模块：绘制图 2.3 ---
 if __name__ == "__main__":
-    import matplotlib.font_manager as fm
-
-    # 设置字体
-    plt.rcParams['mathtext.fontset'] = 'stix'
-    plt.rcParams['font.family'] = 'serif'
-    plt.rcParams['font.serif'] = 'Times New Roman'
-
-    # 请确保路径正确 (如果报错字体找不到，可注释掉下面几行使用默认字体)
-    zh_font_path = 'C:/Windows/Fonts/simhei.ttf'
-    if __import__('os').path.exists(zh_font_path):
-        zh_font = fm.FontProperties(fname=zh_font_path)
-    else:
-        print("未找到指定中文字体，使用默认字体")
-        zh_font = fm.FontProperties()
 
     # 实例化模型 (内部会自动计算仿真所需的数据)
     atmo = AtmosphereModel()
@@ -120,10 +107,9 @@ if __name__ == "__main__":
     plt.xlim(1e-6, 1e-1)  # 设置X轴范围
     plt.ylim(0, 30)  # 设置Y轴范围
 
-    plt.xlabel("消光系数 ($km^{-1}$)", fontproperties=zh_font)
-    plt.ylabel("高度 (km)", fontproperties=zh_font)
-    plt.title("大气分子、气溶胶及总消光系数廓线", fontproperties=zh_font)
-    plt.grid(True, which="both", ls="-", alpha=0.5)
+    plt.xlabel("消光系数 ($km^{-1}$)", fontproperties=plot_style.style.zh_font)
+    plt.ylabel("高度 ($km$)", fontproperties=plot_style.style.zh_font)
+    plt.title("大气分子、气溶胶及总消光系数廓线", fontproperties=plot_style.style.zh_font)
     plt.legend()
 
     print("AtmosphereModel 验证完成。")
@@ -156,14 +142,13 @@ if __name__ == "__main__":
              linestyle='--')
 
     # 4. 设置样式
-    plt.xlabel("大气透过率 (归一化)", fontproperties=zh_font)
-    plt.ylabel("高度 (km)", fontproperties=zh_font)
-    plt.title("大气垂直透过率随高度变化", fontproperties=zh_font)
+    plt.xlabel("大气透过率 (归一化)", fontproperties=plot_style.style.zh_font)
+    plt.ylabel("高度 ($km$)", fontproperties=plot_style.style.zh_font)
+    plt.title("大气垂直透过率随高度变化", fontproperties=plot_style.style.zh_font)
 
     plt.xlim(0.8, 1.0)  # 透过率在 0~1 之间
     plt.ylim(0, 30)  # 高度 0~30 km
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    plt.legend(prop=zh_font)  # 确保图例中文正常显示
+    plt.legend(prop=plot_style.style.zh_font)  # 确保图例中文正常显示
 
     print("大气透过率图表已生成。")
     plt.show()

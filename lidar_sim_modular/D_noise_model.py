@@ -3,19 +3,12 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import os
 
+from matplotlib.pyplot import xlabel
+
+import S_plot_style as plot_style
+
 # 导入参数模块
 from A_lidar_params import params
-
-# 设置绘图字体
-plt.rcParams['mathtext.fontset'] = 'stix'
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.serif'] = 'Times New Roman'
-zh_font_path = 'C:/Windows/Fonts/simhei.ttf'
-if __import__('os').path.exists(zh_font_path):
-    zh_font = fm.FontProperties(fname=zh_font_path)
-else:
-    zh_font = fm.FontProperties()
-
 
 class NoiseModel:
     """
@@ -194,76 +187,57 @@ if __name__ == "__main__":
     f_axis = params.freqs / 1e6  # MHz
 
     # --- 1. 复现图 2.7 (散粒与热噪声时域) ---
-    print("绘图 1/6: 散粒与热噪声时域 (Fig 2.7)...")
+    print("绘图 1/6: 散粒与热噪声时域...")
     shot_p, thermal_p = nm.calculate_gaussian_variance()
     noise_shot = np.random.normal(0, np.sqrt(shot_p), 512) * 1e6  # uA
     noise_therm = np.random.normal(0, np.sqrt(thermal_p), 512) * 1e6  # uA
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
     ax1.plot(t_axis, noise_shot, color='brown', lw=0.8)
-    ax1.set_title("Fig 2.7(a) 散粒噪声", fontproperties=zh_font)
-    ax1.set_ylabel("电流 (uA)", fontproperties=zh_font)
-    ax1.set_xlabel("时间 (ns)", fontproperties=zh_font)
-    ax1.grid(alpha=0.3)
-
+    plot_style.style.apply_standard_layout(fig, ax1, title="散粒噪声", xlabel="时间 ($ns$)", ylabel="电流 ($uA$)")
     ax2.plot(t_axis, noise_therm, color='orange', lw=0.8)
-    ax2.set_title("Fig 2.7(b) 热噪声", fontproperties=zh_font)
-    ax2.set_xlabel("时间 (ns)", fontproperties=zh_font)
-    ax2.grid(alpha=0.3)
+    plot_style.style.apply_standard_layout(fig, ax2, title="热噪声", xlabel="时间 ($ns$)", ylabel="电流 ($uA$)")
     plt.show()
 
     # --- 2. 复现图 2.9 (RIN 特性) ---
-    print("绘图 2/6: RIN 噪声特性 (Fig 2.9)...")
+    print("绘图 2/6: RIN 噪声特性...")
     rin_psd, rin_db = nm.calculate_rin_psd()
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
     ax1.semilogx(f_axis, rin_db, color='red')
-    ax1.set_title("Fig 2.9(a) RIN 频率响应", fontproperties=zh_font)
-    ax1.set_ylabel("RIN (dB/Hz)", fontproperties=zh_font)
-    ax1.set_xlabel("频率 (MHz)", fontproperties=zh_font)
-    ax1.set_xlim(0.1, 100);
-    ax1.grid(True, which="both", alpha=0.3)
+    plot_style.style.apply_standard_layout(fig, ax1, title="RIN频率特性", xlabel="频率 ($MHz$)", ylabel="RIN (dB/Hz)")
+    ax1.set_xlim(0.1, 100)
 
     ax2.semilogx(f_axis, rin_psd, color='red')
-    ax2.set_title("Fig 2.9(b) RIN 功率谱密度", fontproperties=zh_font)
-    ax2.set_ylabel("PSD ($A^2/Hz$)", fontproperties=zh_font)
-    ax2.set_xlabel("频率 (MHz)", fontproperties=zh_font)
-    ax2.set_xlim(0.1, 100);
-    ax2.grid(True, which="both", alpha=0.3)
+    plot_style.style.apply_standard_layout(fig, ax2, title="RIN功率谱密度", xlabel="频率 ($MHz$)", ylabel="PSD ($A^2/Hz$)")
+    ax2.set_xlim(0.1, 100)
     plt.show()
 
     # --- 3. 复现图 2.11 (NEP 特性) ---
-    print("绘图 3/6: 探测器噪声特性 (Fig 2.11)...")
+    print("绘图 3/6: 平衡探测器噪声特性...")
     nep_psd, resp = nm.calculate_nep_psd()
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
-    ax1.plot(f_axis, resp, color='blue')
-    ax1.set_title("Fig 2.11(b) 探测器带宽响应", fontproperties=zh_font)
-    ax1.set_ylabel("响应度归一化", fontproperties=zh_font)
-    ax1.set_xlabel("频率 (MHz)", fontproperties=zh_font)
-    ax1.grid(alpha=0.3)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
+    ax1.plot(f_axis[:len(resp)], resp, color='blue')
+    plot_style.style.apply_standard_layout(fig, ax1, title="BDN 工作带宽频率特性", xlabel="频率 ($MHz$)", ylabel="归一化响应")
+    ax1.set_xlim(0, 500)
 
     ax2.plot(f_axis, nep_psd, color='red')
-    ax2.set_title("Fig 2.11(c) BDN 功率谱密度", fontproperties=zh_font)
-    ax2.set_ylabel("PSD ($A^2/Hz$)", fontproperties=zh_font)
-    ax2.set_xlabel("频率 (MHz)", fontproperties=zh_font)
-    ax2.grid(alpha=0.3)
+    plot_style.style.apply_standard_layout(fig, ax2, title="BDN功率谱密度", xlabel="频率 ($MHz$)", ylabel="PSD ($A^2/Hz$)")
+    ax2.set_xlim(0, 500)
     plt.show()
 
     # --- 4. 复现图 2.12 (有色噪声时域) ---
-    print("绘图 4/6: 有色噪声时域波形 (Fig 2.12)...")
+    print("绘图 4/6: 有色噪声时域波形...")
     n_rin = nm.simulate_colored_noise_from_psd(rin_psd)[:512] * 1e6  # uA
     n_nep = nm.simulate_colored_noise_from_psd(nep_psd)[:512] * 1e6  # uA
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
     ax1.plot(t_axis, n_rin, color='teal', lw=0.8)
-    ax1.set_title("Fig 2.12(a) RIN 时域", fontproperties=zh_font)
-    ax1.set_ylabel("电流 (uA)", fontproperties=zh_font)
-    ax1.grid(alpha=0.3)
+    plot_style.style.apply_standard_layout(fig, ax1, title="相对强度噪声", xlabel="时间 ($ns$)", ylabel="电流 ($\u00B5 A$)")
 
     ax2.plot(t_axis, n_nep, color='steelblue', lw=0.8)
-    ax2.set_title("Fig 2.12(b) BDN 时域", fontproperties=zh_font)
-    ax2.grid(alpha=0.3)
+    plot_style.style.apply_standard_layout(fig, ax2, title="平衡探测器噪声", xlabel="时间 ($ns$)", ylabel="电流 ($\u00B5 A$)")
     plt.show()
 
     # --- 5. 复现图 2.13/2.14 (脉冲累积效果 - 耗时!) ---
@@ -306,15 +280,13 @@ if __name__ == "__main__":
 
     for k in range(len(acc_list)):
         ax1.plot(f_axis, 10 * np.log10(psd_avg_shot[k]), label=f'N={acc_list[k]}', color=colors[k], lw=0.8)
-    ax1.set_title("散粒噪声 PSD 随累积次数变化 (dB)", fontproperties=zh_font)
+    ax1.set_title("散粒噪声 PSD 随累积次数变化 (dB)", fontproperties=plot_style.style.zh_font)
     ax1.legend()
-    ax1.grid(alpha=0.3)
 
     for k in range(len(acc_list)):
         ax2.plot(f_axis, 10 * np.log10(psd_avg_nep[k]), label=f'N={acc_list[k]}', color=colors[k], lw=0.8)
-    ax2.set_title("BDN噪声 PSD 随累积次数变化 (dB)", fontproperties=zh_font)
+    ax2.set_title("BDN噪声 PSD 随累积次数变化 (dB)", fontproperties=plot_style.style.zh_font)
     ax2.legend()
-    ax2.grid(alpha=0.3)
 
     plt.show()
     print("NoiseModel 验证完成。")
