@@ -1,163 +1,92 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 import os
+from tqdm import tqdm  # 进度条库
 
-from matplotlib.pyplot import xlabel
-
+# 导入参数模块和绘图风格
+from A_lidar_params import params
 import S_plot_style as plot_style
 
-# 导入参数模块
-from A_lidar_params import params
 
 class NoiseModel:
     """
-    噪声仿真模块。
+    噪声仿真模块 (物理修正版)
     负责生成散粒噪声、热噪声、RIN噪声和探测器NEP噪声。
-    参考文献: 论文 2.3 节
     """
 
     def __init__(self):
         self.p = params
 
-        # --- RIN 参数 [cite: 620] ---
+        # --- RIN 参数 ---
         self.fr = 660e3  # 弛豫频率 (Hz)
         self.Gamma = 40.8e3  # 阻尼因子
         self.A = 2e12
         self.B = 0.1
 
         # --- NEP 参数 ---
-        # 加载 nep_fit_smooth.npy
         try:
+            # [物理修正] NEP 单位转换 pW -> W
             raw_nep = np.load('nep_fit_smooth.npy')
             self.nep_profile = raw_nep * 1e-12
         except FileNotFoundError:
             print("Warning: 'nep_fit_smooth.npy' not found. Using zero noise for NEP.")
             self.nep_profile = np.zeros(self.p.points_per_bin)
-            # 注意：原代码这里加载的是512点，对应 fs/2 的频率轴
 
-        self.f_low = 10e3  # 响应度低频截止
-        self.f_high = 200e6  # 响应度高频截止 (带宽)
+        self.f_low = 10e3
+        self.f_high = 200e6
 
     def calculate_gaussian_variance(self):
-        """
-        计算高斯白噪声的方差 (电流功率 A^2)
-        """
-        # 1. 散粒噪声功率
-        # <i^2> = 2 * e * R * P_LO * B
+        """计算高斯白噪声方差 (A^2)"""
         shot_power = 2 * self.p.q_electron * self.p.responsivity * \
                      self.p.local_power * self.p.bandwidth
-
-        # 2. 热噪声功率
-        # <i^2> = 4 * k * T * B / R_load
         thermal_power = 4 * self.p.k_boltzmann * self.p.temperature * \
                         self.p.bandwidth / self.p.load_resistance
-
         return shot_power, thermal_power
 
-    def simulate_gaussian_noise(self):
-        """
-        生成时域高斯白噪声 (散粒+热)
-        """
-        shot_p, thermal_p = self.calculate_gaussian_variance()
-        total_std = np.sqrt(shot_p + thermal_p)
-
-        # 生成随机噪声
-        return np.random.normal(0, total_std, self.p.fft_points)
-
     def calculate_rin_psd(self):
-        """
-        计算 RIN 噪声的功率谱密度 (A^2/Hz)
-
-        """
-        freqs = self.p.freqs
-        omega = 2 * np.pi * freqs
-        omega_fr = 2 * np.pi * self.fr
-
-        # RIN(f) 相对强度噪声谱 (dB/Hz)
-        num = self.A + self.B * omega ** 2
-        den = (omega_fr ** 2 + self.Gamma ** 2 - omega ** 2) ** 2 + (4 * self.Gamma ** 2 * omega ** 2)
-        # 防止除零 (freqs[0]接近0)
+        """计算 RIN 电流 PSD (A^2/Hz)"""
+        omega = 2 * np.pi * self.p.freqs
+        # 避免除零
+        den = ((2 * np.pi * self.fr) ** 2 + self.Gamma ** 2 - omega ** 2) ** 2 + (4 * self.Gamma ** 2 * omega ** 2)
         den[den == 0] = 1e-20
+        rin_linear = (self.A + self.B * omega ** 2) / den
+        RIN_f_db = 10 * np.log10(rin_linear)
 
-        rin_val_linear = num / den
-        RIN_f_db = 10 * np.log10(rin_val_linear)  # 用于绘图验证
-
-        # 转换为电流 PSD (A^2/Hz)
-        # PSD = 2 * R^2 * P_LO^2 * 10^(RIN/10)  (系数2来自单边/双边谱定义或论文习惯)
-        # 这里我们直接使用物理推导: I_rin^2 = P_LO^2 * 10^(RIN/10) * R^2
-        rin_psd_current = 2 * (self.p.responsivity * self.p.local_power) ** 2 * rin_val_linear
-
+        # [物理修正] 电流 PSD 公式
+        rin_psd_current = 2 * (self.p.responsivity * self.p.local_power) ** 2 * rin_linear
         return rin_psd_current, RIN_f_db
 
     def calculate_nep_psd(self):
-        """
-        计算探测器(BDN)噪声的功率谱密度 (A^2/Hz)
-
-        """
-        # 探测器频率响应 H(f)
-        # 使用16次方模拟陡峭的200MHz截止特性
+        """计算 BDN 电流 PSD (A^2/Hz)"""
         H_f = 1 / np.sqrt(1 + (self.f_low / self.p.freqs) ** 16) / \
               np.sqrt(1 + (self.p.freqs / self.f_high) ** 16)
 
-        # 有效响应度
-        resp_effective = self.p.responsivity * H_f
-
-        # PSD = (NEP * R_eff)^2
-        # 注意：self.nep_profile 长度可能只有 512 (对应正频率)，需匹配
         n_pts = min(len(self.nep_profile), len(self.p.freqs))
         nep_part = self.nep_profile[:n_pts]
-        resp_part = resp_effective[:n_pts]
+        resp_part = (self.p.responsivity * H_f)[:n_pts]
 
         nep_psd_current = (nep_part * resp_part) ** 2
-
         return nep_psd_current, resp_part
 
     def simulate_colored_noise_from_psd(self, psd_onesided):
-        """
-        通用方法：利用频域随机相位法从 PSD 生成时域噪声
-        [cite: 492-512]
-        """
-        N = self.p.fft_points
-        df = self.p.sample_rate / N
+        """从 PSD 生成有色噪声时域波形"""
+        df = self.p.sample_rate / self.p.fft_points
+        target_power = np.sum(psd_onesided * df)
 
-        # 1. 构造双边幅度谱
-        # PSD(单边) -> 功率 P = PSD * df
-        # 幅度 A = sqrt(P) * sqrt(N) (为了抵消IFFT的1/N系数，或者遵循能量守恒)
-        # 修正逻辑：保持总能量守恒。
-        # 时域方差 sigma^2 = sum(PSD * df)
-        # IFFT后时域信号 variance 应该是这个值。
-
-        # 简单实现：构造 sqrt(PSD)，然后 IFFT，再缩放
-        target_power = np.sum(psd_onesided * df)  # 目标总功率 (A^2)
-
-        # 构造双边谱 (对称)
-        # psd_onesided 对应 [0, 1, ..., N/2-1]
-        # 镜像翻转用于负频率
         spec_mag = np.sqrt(psd_onesided)
         spec_double = np.concatenate((spec_mag, spec_mag[::-1]))
-
-        # 2. 添加随机相位
         random_phase = np.exp(1j * 2 * np.pi * np.random.rand(len(spec_double)))
-        noise_freq = spec_double * random_phase
 
-        # 3. IFFT
-        noise_time = np.fft.ifft(noise_freq).real
+        noise_time = np.fft.ifft(spec_double * random_phase).real
 
-        # 4. 幅度校正 (强制能量守恒)
-        # 当前方差
+        # 能量校正
         current_var = np.var(noise_time)
         if current_var > 0:
-            scale = np.sqrt(target_power / current_var)
-            noise_time *= scale
-
+            noise_time *= np.sqrt(target_power / current_var)
         return noise_time
 
     def generate_total_noise(self):
-        """
-        生成组合后的总噪声
-        """
-        # 1. 生成各分量
+        """生成组合后的总噪声 (核心接口)"""
         shot_p, thermal_p = self.calculate_gaussian_variance()
         noise_gauss = np.random.normal(0, np.sqrt(shot_p + thermal_p), self.p.fft_points)
 
@@ -167,126 +96,212 @@ class NoiseModel:
         nep_psd, _ = self.calculate_nep_psd()
         noise_nep = self.simulate_colored_noise_from_psd(nep_psd)
 
-        # 2. 组合 (直接相加，因为它们是不相关的随机过程)
-        # 原论文代码中有一个 "8 * nep" 的权重，这可能是为了模拟 8 个探测器阵列？
-        # 或者是一个经验系数。为了物理严谨，我们这里先直接相加。
-        # 如果为了复现原代码效果，可以取消下面注释：
-        # noise_nep *= 8.0
-
         total_noise = noise_gauss + noise_rin + noise_nep
-
         return noise_rin, noise_gauss, noise_nep, total_noise
 
 
 # =============================================================================
-# 验证绘图部分 (复现论文图 2.7 - 2.14)
+# 独立绘图验证 (所有图表独立显示)
 # =============================================================================
 if __name__ == "__main__":
     nm = NoiseModel()
-    t_axis = np.arange(params.points_per_bin) * params.time_step * 1e9  # ns
-    f_axis = params.freqs / 1e6  # MHz
 
-    # --- 1. 复现图 2.7 (散粒与热噪声时域) ---
-    print("绘图 1/6: 散粒与热噪声时域...")
+    # 1. 准备坐标轴
+    t_axis = np.arange(params.points_per_bin) * params.time_step * 1e9  # ns
+    f_axis_std = params.freqs / 1e6  # MHz (标准线性轴)
+
+    # 高分辨率轴 (仅用于 RIN 理论曲线)
+    f_plot_hz = np.logspace(5, 8, 2000)
+    f_plot_mhz = f_plot_hz / 1e6
+
+    # ==========================================
+    # 1. 图 2.7: 散粒噪声与热噪声 (时域)
+    # ==========================================
+    print("绘图: 散粒与热噪声时域 (Fig 2.7)...")
     shot_p, thermal_p = nm.calculate_gaussian_variance()
     noise_shot = np.random.normal(0, np.sqrt(shot_p), 512) * 1e6  # uA
     noise_therm = np.random.normal(0, np.sqrt(thermal_p), 512) * 1e6  # uA
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
+    # (a) 散粒噪声
+    fig1 = plt.figure(figsize=(6, 4))
+    ax1 = fig1.add_subplot(111)
     ax1.plot(t_axis, noise_shot, color='brown', lw=0.8)
-    plot_style.style.apply_standard_layout(fig, ax1, title="散粒噪声", xlabel="时间 ($ns$)", ylabel="电流 ($uA$)")
+    plot_style.style.apply_standard_layout(fig1, ax1, title="Fig 2.7(a) 散粒噪声", xlabel="时间 (ns)",
+                                           ylabel="电流 ($\u00B5 A$)")
+
+    # (b) 热噪声
+    fig2 = plt.figure(figsize=(6, 4))
+    ax2 = fig2.add_subplot(111)
     ax2.plot(t_axis, noise_therm, color='orange', lw=0.8)
-    plot_style.style.apply_standard_layout(fig, ax2, title="热噪声", xlabel="时间 ($ns$)", ylabel="电流 ($uA$)")
+    plot_style.style.apply_standard_layout(fig2, ax2, title="Fig 2.7(b) 热噪声", xlabel="时间 (ns)",
+                                           ylabel="电流 ($\u00B5 A$)")
+
     plt.show()
 
-    # --- 2. 复现图 2.9 (RIN 特性) ---
-    print("绘图 2/6: RIN 噪声特性...")
-    rin_psd, rin_db = nm.calculate_rin_psd()
+    # ==========================================
+    # 2. 图 2.9: RIN 噪声特性 (使用高分辨率轴)
+    # ==========================================
+    print("绘图: RIN 噪声特性 (Fig 2.9)...")
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
-    ax1.semilogx(f_axis, rin_db, color='red')
-    plot_style.style.apply_standard_layout(fig, ax1, title="RIN频率特性", xlabel="频率 ($MHz$)", ylabel="RIN (dB/Hz)")
-    ax1.set_xlim(0.1, 100)
+    # [切换轴]
+    original_freqs = nm.p.freqs
+    nm.p.freqs = f_plot_hz
+    rin_psd_high, rin_db_high = nm.calculate_rin_psd()
+    nm.p.freqs = original_freqs  # [恢复轴]
 
-    ax2.semilogx(f_axis, rin_psd, color='red')
-    plot_style.style.apply_standard_layout(fig, ax2, title="RIN功率谱密度", xlabel="频率 ($MHz$)", ylabel="PSD ($A^2/Hz$)")
-    ax2.set_xlim(0.1, 100)
+    # (a) RIN 频率响应 (dB)
+    fig3 = plt.figure(figsize=(6, 4))
+    ax3 = fig3.add_subplot(111)
+    ax3.semilogx(f_plot_mhz, rin_db_high, color='red')
+    plot_style.style.apply_standard_layout(fig3, ax3, title="Fig 2.9(a) RIN 频率特性", xlabel="频率 (MHz)",
+                                           ylabel="RIN (dB/Hz)")
+    ax3.set_xlim(0.1, 100)
+
+    # 标注峰值
+    max_idx = np.argmax(rin_db_high)
+    ax3.text(f_plot_mhz[max_idx], rin_db_high[max_idx],
+             f' Peak: {rin_db_high[max_idx]:.2f} dB/Hz', verticalalignment='bottom')
+
+    # (b) RIN 功率谱密度 (PSD)
+    fig4 = plt.figure(figsize=(6, 4))
+    ax4 = fig4.add_subplot(111)
+    ax4.semilogx(f_plot_mhz, rin_psd_high, color='red')
+    plot_style.style.apply_standard_layout(fig4, ax4, title="Fig 2.9(b) RIN 功率谱密度", xlabel="频率 (MHz)",
+                                           ylabel="PSD ($A^2/Hz$)")
+    ax4.set_xlim(0.1, 100)
+
     plt.show()
 
-    # --- 3. 复现图 2.11 (NEP 特性) ---
-    print("绘图 3/6: 平衡探测器噪声特性...")
+    # ==========================================
+    # 3. 图 2.11: 平衡探测器噪声 (使用标准轴)
+    # ==========================================
+    print("绘图: 平衡探测器噪声特性 (Fig 2.11)...")
     nep_psd, resp = nm.calculate_nep_psd()
+    f_axis_nep = f_axis_std[:len(resp)]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
-    ax1.plot(f_axis[:len(resp)], resp, color='blue')
-    plot_style.style.apply_standard_layout(fig, ax1, title="BDN 工作带宽频率特性", xlabel="频率 ($MHz$)", ylabel="归一化响应")
-    ax1.set_xlim(0, 500)
+    # (b) 探测器响应
+    fig5 = plt.figure(figsize=(6, 4))
+    ax5 = fig5.add_subplot(111)
+    ax5.plot(f_axis_nep, resp, color='blue')
+    plot_style.style.apply_standard_layout(fig5, ax5, title="Fig 2.11(b) 探测器带宽响应", xlabel="频率 (MHz)",
+                                           ylabel="归一化响应")
+    ax5.set_xlim(0, 500)
 
-    ax2.plot(f_axis, nep_psd, color='red')
-    plot_style.style.apply_standard_layout(fig, ax2, title="BDN功率谱密度", xlabel="频率 ($MHz$)", ylabel="PSD ($A^2/Hz$)")
-    ax2.set_xlim(0, 500)
+    # (c) BDN 功率谱密度
+    fig6 = plt.figure(figsize=(6, 4))
+    ax6 = fig6.add_subplot(111)
+    ax6.plot(f_axis_nep, nep_psd, color='red')
+    plot_style.style.apply_standard_layout(fig6, ax6, title="Fig 2.11(c) BDN 功率谱密度", xlabel="频率 (MHz)",
+                                           ylabel="PSD ($A^2/Hz$)")
+    ax6.set_xlim(0, 500)
+
     plt.show()
 
-    # --- 4. 复现图 2.12 (有色噪声时域) ---
-    print("绘图 4/6: 有色噪声时域波形...")
-    n_rin = nm.simulate_colored_noise_from_psd(rin_psd)[:512] * 1e6  # uA
-    n_nep = nm.simulate_colored_noise_from_psd(nep_psd)[:512] * 1e6  # uA
+    # ==========================================
+    # 4. 图 2.12: 有色噪声时域波形
+    # ==========================================
+    print("绘图: 有色噪声时域波形 (Fig 2.12)...")
+    # 重新计算标准轴下的 PSD 用于 IFFT
+    rin_psd_std, _ = nm.calculate_rin_psd()
+    n_rin = nm.simulate_colored_noise_from_psd(rin_psd_std)[:512] * 1e6
+    n_nep = nm.simulate_colored_noise_from_psd(nep_psd)[:512] * 1e6
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
-    ax1.plot(t_axis, n_rin, color='teal', lw=0.8)
-    plot_style.style.apply_standard_layout(fig, ax1, title="相对强度噪声", xlabel="时间 ($ns$)", ylabel="电流 ($\u00B5 A$)")
+    # (a) RIN 时域
+    fig7 = plt.figure(figsize=(6, 4))
+    ax7 = fig7.add_subplot(111)
+    ax7.plot(t_axis, n_rin, color='teal', lw=0.8)
+    plot_style.style.apply_standard_layout(fig7, ax7, title="Fig 2.12(a) RIN 时域", xlabel="时间 (ns)",
+                                           ylabel="电流 ($\u00B5 A$)")
 
-    ax2.plot(t_axis, n_nep, color='steelblue', lw=0.8)
-    plot_style.style.apply_standard_layout(fig, ax2, title="平衡探测器噪声", xlabel="时间 ($ns$)", ylabel="电流 ($\u00B5 A$)")
+    # (b) BDN 时域
+    fig8 = plt.figure(figsize=(6, 4))
+    ax8 = fig8.add_subplot(111)
+    ax8.plot(t_axis, n_nep, color='steelblue', lw=0.8)
+    plot_style.style.apply_standard_layout(fig8, ax8, title="Fig 2.12(b) BDN 时域", xlabel="时间 (ns)",
+                                           ylabel="电流 ($\u00B5 A$)")
+
     plt.show()
 
-    # --- 5. 复现图 2.13/2.14 (脉冲累积效果 - 耗时!) ---
-    print("绘图 5/6: 脉冲累积对PSD的影响 (Fig 2.13, 2.14)...")
-    print("  正在进行 1000 次蒙特卡洛模拟，请稍候...")
+    # ==========================================
+    # 5. 图 2.13 & 2.14: 脉冲累积效果 (耗时)
+    # ==========================================
+    print("绘图: 脉冲累积对PSD的影响 (Fig 2.13, 2.14)...")
 
-    # 累积次数列表
     acc_list = [1, 10, 100, 1000]
-
-    # 存储累积后的 PSD
     psd_avg_shot = np.zeros((len(acc_list), 512))
+    psd_avg_therm = np.zeros((len(acc_list), 512))
+    psd_avg_rin = np.zeros((len(acc_list), 512))
     psd_avg_nep = np.zeros((len(acc_list), 512))
 
-    # 临时累加器
-    accum_shot = np.zeros(512)
+    accum_shot = np.zeros(512);
+    accum_therm = np.zeros(512)
+    accum_rin = np.zeros(512);
     accum_nep = np.zeros(512)
 
-    for i in range(1, 1001):
-        # 生成噪声
-        n_shot = np.random.normal(0, np.sqrt(shot_p), 1024)
-        n_nep_t = nm.simulate_colored_noise_from_psd(nep_psd)  # 1024点
+    # 归一化因子 (转换为物理PSD A^2/Hz)
+    psd_norm = 2.0 / (params.sample_rate * params.fft_points)
 
-        # 计算 PSD (Periodogram: |FFT|^2 / (fs*N))
-        # 注意：这里为了显示清晰，可能不需要除以 fs*N，直接看相对值
-        # 但为了物理严谨，我们还是算 |FFT|^2
-        fft_shot = np.abs(np.fft.fft(n_shot)[:512]) ** 2
-        fft_nep = np.abs(np.fft.fft(n_nep_t)[:512]) ** 2
+    for i in tqdm(range(1, 1001), desc="Accumulating"):
+        # 生成单次噪声
+        ns_shot = np.random.normal(0, np.sqrt(shot_p), params.fft_points)
+        ns_therm = np.random.normal(0, np.sqrt(thermal_p), params.fft_points)
+        ns_rin = nm.simulate_colored_noise_from_psd(rin_psd_std)
+        ns_nep = nm.simulate_colored_noise_from_psd(nep_psd)
 
-        accum_shot += fft_shot
-        accum_nep += fft_nep
+        # 累积 PSD
+        accum_shot += np.abs(np.fft.fft(ns_shot)[:512]) ** 2
+        accum_therm += np.abs(np.fft.fft(ns_therm)[:512]) ** 2
+        accum_rin += np.abs(np.fft.fft(ns_rin)[:512]) ** 2
+        accum_nep += np.abs(np.fft.fft(ns_nep)[:512]) ** 2
 
         if i in acc_list:
             idx = acc_list.index(i)
-            psd_avg_shot[idx] = accum_shot / i
-            psd_avg_nep[idx] = accum_nep / i
+            psd_avg_shot[idx] = (accum_shot / i) * psd_norm
+            psd_avg_therm[idx] = (accum_therm / i) * psd_norm
+            psd_avg_rin[idx] = (accum_rin / i) * psd_norm
+            psd_avg_nep[idx] = (accum_nep / i) * psd_norm
 
-    # 绘制对比图
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
     colors = ['lightblue', 'skyblue', 'dodgerblue', 'navy']
 
-    for k in range(len(acc_list)):
-        ax1.plot(f_axis, 10 * np.log10(psd_avg_shot[k]), label=f'N={acc_list[k]}', color=colors[k], lw=0.8)
-    ax1.set_title("散粒噪声 PSD 随累积次数变化 (dB)", fontproperties=plot_style.style.zh_font)
-    ax1.legend()
+    # (a) 散粒噪声累积
+    fig9 = plt.figure(figsize=(6, 4))
+    ax9 = fig9.add_subplot(111)
+    for k, acc in enumerate(acc_list):
+        ax9.plot(f_axis_std, psd_avg_shot[k], label=f'N={acc}', color=colors[k], lw=0.8)
+    plot_style.style.apply_standard_layout(fig9, ax9, title="Fig 2.13(a) 散粒噪声累积谱", xlabel="频率 (MHz)",
+                                           ylabel="PSD ($A^2/Hz$)")
+    ax9.set_ylim(0, 4e-21);
+    ax9.legend()
 
-    for k in range(len(acc_list)):
-        ax2.plot(f_axis, 10 * np.log10(psd_avg_nep[k]), label=f'N={acc_list[k]}', color=colors[k], lw=0.8)
-    ax2.set_title("BDN噪声 PSD 随累积次数变化 (dB)", fontproperties=plot_style.style.zh_font)
-    ax2.legend()
+    # (b) 热噪声累积
+    fig10 = plt.figure(figsize=(6, 4))
+    ax10 = fig10.add_subplot(111)
+    for k, acc in enumerate(acc_list):
+        ax10.plot(f_axis_std, psd_avg_therm[k], label=f'N={acc}', color=colors[k], lw=0.8)
+    plot_style.style.apply_standard_layout(fig10, ax10, title="Fig 2.13(b) 热噪声累积谱", xlabel="频率 (MHz)",
+                                           ylabel="PSD ($A^2/Hz$)")
+    ax10.set_ylim(0, 3e-21);
+    ax10.legend()
+
+    # (c) RIN 累积
+    fig11 = plt.figure(figsize=(6, 4))
+    ax11 = fig11.add_subplot(111)
+    for k, acc in enumerate(acc_list):
+        ax11.plot(f_axis_std, psd_avg_rin[k], label=f'N={acc}', color=colors[k], lw=0.8)
+    plot_style.style.apply_standard_layout(fig11, ax11, title="Fig 2.14(a) RIN 累积谱", xlabel="频率 (MHz)",
+                                           ylabel="PSD ($A^2/Hz$)")
+    ax11.set_ylim(0, 8e-24);
+    ax11.legend()
+
+    # (d) BDN 累积
+    fig12 = plt.figure(figsize=(6, 4))
+    ax12 = fig12.add_subplot(111)
+    for k, acc in enumerate(acc_list):
+        ax12.plot(f_axis_std, psd_avg_nep[k], label=f'N={acc}', color=colors[k], lw=0.8)
+    plot_style.style.apply_standard_layout(fig12, ax12, title="Fig 2.14(b) BDN 累积谱", xlabel="频率 (MHz)",
+                                           ylabel="PSD ($A^2/Hz$)")
+    ax12.set_ylim(0, 2.5e-24);
+    ax12.legend()
 
     plt.show()
-    print("NoiseModel 验证完成。")
+    print("所有图表绘制完成。")
