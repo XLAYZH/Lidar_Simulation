@@ -123,18 +123,20 @@ if __name__ == "__main__":
     noise_therm = np.random.normal(0, np.sqrt(thermal_p), 512) * 1e6  # uA
 
     # (a) 散粒噪声
-    fig1 = plt.figure(figsize=(6, 4))
+    fig1 = plt.figure(figsize=(10, 10))
     ax1 = fig1.add_subplot(111)
     ax1.plot(t_axis, noise_shot, color='brown', lw=0.8)
-    plot_style.style.apply_standard_layout(fig1, ax1, title="Fig 2.7(a) 散粒噪声", xlabel="时间 (ns)",
+    plot_style.style.apply_standard_layout(fig1, ax1, title="散粒噪声", xlabel="时间 (ns)",
                                            ylabel="电流 ($\u00B5 A$)")
+    ax1.set_xlim(0, 500)
 
     # (b) 热噪声
-    fig2 = plt.figure(figsize=(6, 4))
+    fig2 = plt.figure(figsize=(10, 10))
     ax2 = fig2.add_subplot(111)
     ax2.plot(t_axis, noise_therm, color='orange', lw=0.8)
-    plot_style.style.apply_standard_layout(fig2, ax2, title="Fig 2.7(b) 热噪声", xlabel="时间 (ns)",
+    plot_style.style.apply_standard_layout(fig2, ax2, title="热噪声", xlabel="时间 (ns)",
                                            ylabel="电流 ($\u00B5 A$)")
+    ax2.set_xlim(0, 500)
 
     plt.show()
 
@@ -150,23 +152,18 @@ if __name__ == "__main__":
     nm.p.freqs = original_freqs  # [恢复轴]
 
     # (a) RIN 频率响应 (dB)
-    fig3 = plt.figure(figsize=(6, 4))
+    fig3 = plt.figure(figsize=(10, 10))
     ax3 = fig3.add_subplot(111)
     ax3.semilogx(f_plot_mhz, rin_db_high, color='red')
-    plot_style.style.apply_standard_layout(fig3, ax3, title="Fig 2.9(a) RIN 频率特性", xlabel="频率 (MHz)",
+    plot_style.style.apply_standard_layout(fig3, ax3, title="RIN 频率特性", xlabel="频率 (MHz)",
                                            ylabel="RIN (dB/Hz)")
     ax3.set_xlim(0.1, 100)
 
-    # 标注峰值
-    max_idx = np.argmax(rin_db_high)
-    ax3.text(f_plot_mhz[max_idx], rin_db_high[max_idx],
-             f' Peak: {rin_db_high[max_idx]:.2f} dB/Hz', verticalalignment='bottom')
-
     # (b) RIN 功率谱密度 (PSD)
-    fig4 = plt.figure(figsize=(6, 4))
+    fig4 = plt.figure(figsize=(10, 10))
     ax4 = fig4.add_subplot(111)
     ax4.semilogx(f_plot_mhz, rin_psd_high, color='red')
-    plot_style.style.apply_standard_layout(fig4, ax4, title="Fig 2.9(b) RIN 功率谱密度", xlabel="频率 (MHz)",
+    plot_style.style.apply_standard_layout(fig4, ax4, title="RIN 功率谱密度", xlabel="频率 (MHz)",
                                            ylabel="PSD ($A^2/Hz$)")
     ax4.set_xlim(0.1, 100)
 
@@ -180,18 +177,18 @@ if __name__ == "__main__":
     f_axis_nep = f_axis_std[:len(resp)]
 
     # (b) 探测器响应
-    fig5 = plt.figure(figsize=(6, 4))
+    fig5 = plt.figure(figsize=(10, 10))
     ax5 = fig5.add_subplot(111)
     ax5.plot(f_axis_nep, resp, color='blue')
-    plot_style.style.apply_standard_layout(fig5, ax5, title="Fig 2.11(b) 探测器带宽响应", xlabel="频率 (MHz)",
+    plot_style.style.apply_standard_layout(fig5, ax5, title="Thorlabs PDB460C平衡探测器带宽响应", xlabel="频率 (MHz)",
                                            ylabel="归一化响应")
     ax5.set_xlim(0, 500)
 
     # (c) BDN 功率谱密度
-    fig6 = plt.figure(figsize=(6, 4))
+    fig6 = plt.figure(figsize=(10, 10))
     ax6 = fig6.add_subplot(111)
     ax6.plot(f_axis_nep, nep_psd, color='red')
-    plot_style.style.apply_standard_layout(fig6, ax6, title="Fig 2.11(c) BDN 功率谱密度", xlabel="频率 (MHz)",
+    plot_style.style.apply_standard_layout(fig6, ax6, title="BDN 功率谱密度", xlabel="频率 (MHz)",
                                            ylabel="PSD ($A^2/Hz$)")
     ax6.set_xlim(0, 500)
 
@@ -207,18 +204,20 @@ if __name__ == "__main__":
     n_nep = nm.simulate_colored_noise_from_psd(nep_psd)[:512] * 1e6
 
     # (a) RIN 时域
-    fig7 = plt.figure(figsize=(6, 4))
+    fig7 = plt.figure(figsize=(10, 10))
     ax7 = fig7.add_subplot(111)
     ax7.plot(t_axis, n_rin, color='teal', lw=0.8)
-    plot_style.style.apply_standard_layout(fig7, ax7, title="Fig 2.12(a) RIN 时域", xlabel="时间 (ns)",
+    plot_style.style.apply_standard_layout(fig7, ax7, title="相对强度噪声", xlabel="时间 (ns)",
                                            ylabel="电流 ($\u00B5 A$)")
+    ax7.set_xlim(0)
 
     # (b) BDN 时域
-    fig8 = plt.figure(figsize=(6, 4))
+    fig8 = plt.figure(figsize=(10, 10))
     ax8 = fig8.add_subplot(111)
     ax8.plot(t_axis, n_nep, color='steelblue', lw=0.8)
-    plot_style.style.apply_standard_layout(fig8, ax8, title="Fig 2.12(b) BDN 时域", xlabel="时间 (ns)",
+    plot_style.style.apply_standard_layout(fig8, ax8, title="平衡探测器噪声", xlabel="时间 (ns)",
                                            ylabel="电流 ($\u00B5 A$)")
+    ax8.set_xlim(0)
 
     plt.show()
 
@@ -261,46 +260,54 @@ if __name__ == "__main__":
             psd_avg_rin[idx] = (accum_rin / i) * psd_norm
             psd_avg_nep[idx] = (accum_nep / i) * psd_norm
 
-    colors = ['lightblue', 'skyblue', 'dodgerblue', 'navy']
+    # N=1: 蓝色, N=10: 橙色, N=100: 绿色, N=1000: 红色
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+
+    # 为了防止线条太粗遮挡，稍微调整线宽
+    # N=1 时线条最细，N=1000 时线条稍粗，以突出重点
+    linewidths = [0.5, 0.8, 1.0, 1.5]
+    alphas = [0.6, 0.8, 0.9, 1.0]  # 透明度也渐变，让底层线条不那么“实”
 
     # (a) 散粒噪声累积
-    fig9 = plt.figure(figsize=(6, 4))
+    fig9 = plt.figure(figsize=(10, 10))
     ax9 = fig9.add_subplot(111)
     for k, acc in enumerate(acc_list):
-        ax9.plot(f_axis_std, psd_avg_shot[k], label=f'N={acc}', color=colors[k], lw=0.8)
-    plot_style.style.apply_standard_layout(fig9, ax9, title="Fig 2.13(a) 散粒噪声累积谱", xlabel="频率 (MHz)",
+        ax9.plot(f_axis_std, psd_avg_shot[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
+    plot_style.style.apply_standard_layout(fig9, ax9, title="散粒噪声累积功率谱密度", xlabel="频率 (MHz)",
                                            ylabel="PSD ($A^2/Hz$)")
-    ax9.set_ylim(0, 4e-21);
+    ax9.set_xlim(0, 500)
     ax9.legend()
 
     # (b) 热噪声累积
-    fig10 = plt.figure(figsize=(6, 4))
+    fig10 = plt.figure(figsize=(10, 10))
     ax10 = fig10.add_subplot(111)
     for k, acc in enumerate(acc_list):
-        ax10.plot(f_axis_std, psd_avg_therm[k], label=f'N={acc}', color=colors[k], lw=0.8)
-    plot_style.style.apply_standard_layout(fig10, ax10, title="Fig 2.13(b) 热噪声累积谱", xlabel="频率 (MHz)",
+        ax10.plot(f_axis_std, psd_avg_therm[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
+    plot_style.style.apply_standard_layout(fig10, ax10, title="热噪声累积功率谱密度", xlabel="频率 (MHz)",
                                            ylabel="PSD ($A^2/Hz$)")
-    ax10.set_ylim(0, 3e-21);
+    ax10.set_xlim(0, 500)
     ax10.legend()
 
     # (c) RIN 累积
-    fig11 = plt.figure(figsize=(6, 4))
+    fig11 = plt.figure(figsize=(10, 10))
     ax11 = fig11.add_subplot(111)
     for k, acc in enumerate(acc_list):
-        ax11.plot(f_axis_std, psd_avg_rin[k], label=f'N={acc}', color=colors[k], lw=0.8)
-    plot_style.style.apply_standard_layout(fig11, ax11, title="Fig 2.14(a) RIN 累积谱", xlabel="频率 (MHz)",
+        ax11.plot(f_axis_std, psd_avg_rin[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
+    plot_style.style.apply_standard_layout(fig11, ax11, title="RIN 累积功率谱密度", xlabel="频率 (MHz)",
                                            ylabel="PSD ($A^2/Hz$)")
-    ax11.set_ylim(0, 8e-24);
+    ax11.set_xlim(0, 500)
+    ax11.set_ylim(0, 8e-24)
     ax11.legend()
 
     # (d) BDN 累积
-    fig12 = plt.figure(figsize=(6, 4))
+    fig12 = plt.figure(figsize=(10, 10))
     ax12 = fig12.add_subplot(111)
     for k, acc in enumerate(acc_list):
-        ax12.plot(f_axis_std, psd_avg_nep[k], label=f'N={acc}', color=colors[k], lw=0.8)
-    plot_style.style.apply_standard_layout(fig12, ax12, title="Fig 2.14(b) BDN 累积谱", xlabel="频率 (MHz)",
+        ax12.plot(f_axis_std, psd_avg_nep[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
+    plot_style.style.apply_standard_layout(fig12, ax12, title="BDN 累积功率谱密度", xlabel="频率 (MHz)",
                                            ylabel="PSD ($A^2/Hz$)")
-    ax12.set_ylim(0, 2.5e-24);
+    ax12.set_xlim(0, 500)
+    ax12.set_ylim(0)
     ax12.legend()
 
     plt.show()
