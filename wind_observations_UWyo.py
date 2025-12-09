@@ -5,9 +5,9 @@ from datetime import datetime, timedelta#爬取怀俄明探空数据
 
 # ====== 配置参数（只需修改这里）======
 station_id = "54511"
-start_date = "2024-01-01"
-end_date = "2024-12-31"
-save_base_path = "I:\舒英杰\气象数据\探空数据"  # ← 自定义保存目录
+start_date = "2025-01-01"
+end_date = "2025-12-8"
+save_base_path = r"E:\GraduateStu6428\Codes\ObservationData54511"  # ← 自定义保存目录
 # ====================================
 
 def fetch_text_data(station_id, dt_str):
