@@ -1,100 +1,96 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-import S_plot_style as plot_style
-
-# 导入前序模块
 from A_lidar_params import params
 from B_atmosphere_model import AtmosphereModel
+import S_plot_style as plot_style
 
 
 class LidarPhysics:
     """
-    雷达物理层仿真模块。
-    负责计算：
-    1. 发射激光脉冲的时域波形 P_T(t)
-    2. 基于雷达方程和散斑效应的理想外差信号 i_h(t)
+    雷达物理层仿真模块 (支持风廓线输入版)
     """
 
     def __init__(self):
         self.p = params
         self.atmo = AtmosphereModel()
 
-        # 预计算脉冲形状函数 (归一化的高斯分布部分)
-        # 使用 self.p.range_axis
+        # 预计算脉冲延迟矩阵 (Time x Range)
+        # axis 0: time, axis 1: range layer
         delay = 2 * self.p.range_axis / self.p.c
         self.time_diff = self.p.time_axis[:, np.newaxis] - delay[np.newaxis, :]
 
-        # 高斯因子: exp(-4 * ln2 * (t/tau)^2)
+        # 预计算脉冲形状因子 (高斯包络)
         self.pulse_shape_factor = np.exp(-4 * np.log(2) * (self.time_diff / self.p.pulse_width) ** 2)
 
     def get_pulse_power_profile(self, t_axis=None):
-        """
-        计算单脉冲的瞬时功率 P_T(t) (瓦特)。
-
-        """
         if t_axis is None:
-            t_axis = np.linspace(-1000e-9, 1000e-9, 1000)  # 默认 -1us 到 1us
-
-        # 峰值功率系数 A = E * [2*sqrt(ln2) / (sqrt(pi)*tau)]
-        # 仅与单脉冲能量 E 有关，不乘 PRF
+            t_axis = np.linspace(-1000e-9, 1000e-9, 1000)
         coeff = self.p.pulse_energy * (2 * np.sqrt(np.log(2))) / (np.sqrt(np.pi) * self.p.pulse_width)
-
-        # 时域分布
         profile = coeff * np.exp(-4 * np.log(2) * (t_axis / self.p.pulse_width) ** 2)
         return t_axis, profile
 
-    def simulate_ideal_signal(self, wind_u=5.0):
+    def simulate_ideal_signal(self, v_los_profile=None):
         """
-        模拟单次脉冲的理想外差电流信号 i_h(t)。
+        生成理想外差信号 (未加噪声)
 
+        参数:
+            v_los_profile: 径向风速数组 (m/s), 长度需等于 range_axis。
+                           如果为 None, 则默认使用 0 m/s。
         """
-        # 1. 获取大气光学参数 (插值到 slant range)
+        # 1. 准备大气参数
         beta_km = np.interp(self.p.height_axis, self.p.height_axis, self.atmo.beta_total)
-        beta_m = beta_km / 1000.0  # km^-1 -> m^-1
-
+        beta_m = beta_km / 1000.0
         alpha_km = np.interp(self.p.height_axis, self.p.height_axis, self.atmo.alpha_total)
         alpha_m = alpha_km / 1000.0
 
-        # 累积积分计算光学厚度
+        # 双程透过率 T^2
         optical_depth = np.cumsum(alpha_m) * self.p.dist_res
         transmittance_squared = np.exp(-2 * optical_depth)
 
-        # 2. 计算几何因子
+        # 2. 几何因子 (1/R^2)
         geometric_factor = (self.p.telescope_area / self.p.range_axis ** 2) * \
                            self.p.system_efficiency * self.p.dist_res
 
-        # 3. 计算散斑效应期望值 K_m^2
+        # 3. 散斑 (Speckle)
+        # 每个距离门的期望回波强度
         Km_sq_expectation = transmittance_squared * beta_m * geometric_factor
-
-        # 4. 生成随机散斑
+        # 生成瑞利分布幅度 & 均匀分布相位
         rand_phase = np.random.uniform(0, 2 * np.pi, len(Km_sq_expectation))
         rand_amp = np.random.rayleigh(np.sqrt(Km_sq_expectation))
-        Km = rand_amp * np.exp(1j * rand_phase)
+        Km = rand_amp * np.exp(1j * rand_phase)  # 复振幅向量 (N_layers,)
 
-        # 5. 计算相位项 (AOM + Doppler)
+        # 4. 脉冲能量系数
+        E_pulse_coeff = self.p.pulse_energy * (2 * np.sqrt(np.log(2))) / (np.sqrt(np.pi) * self.p.pulse_width)
+        pulse_power_matrix = E_pulse_coeff * self.pulse_shape_factor
+        E_T_matrix = np.sqrt(pulse_power_matrix)  # 电场幅度矩阵 (Time x Range)
+
+        # 5. [核心升级] 多普勒相位矩阵
+        # 针对每个距离门计算不同的多普勒频移
+        if v_los_profile is None:
+            v_los_profile = np.zeros_like(self.p.range_axis)
+
+        # f_d = -2 * v_r / lambda (N_layers,)
+        freq_shifts = -2 * v_los_profile / self.p.wavelength
+
+        # 构建相位矩阵: exp(-j * 2 * pi * f_d * t)
+        # 利用广播机制: (N_time, 1) * (1, N_layers) -> (N_time, N_layers)
+        phase_doppler_matrix = np.exp(-2j * np.pi * self.p.time_axis[:, np.newaxis] * freq_shifts[np.newaxis, :])
+
+        # 6. 信号积分 (相干叠加)
+        # Signal = Sum_over_m ( E_T(t, m) * Km(m) * Phase_Doppler(t, m) )
+        # 逐元素相乘后，沿距离轴(axis 1)求和
+        contribution_matrix = E_T_matrix * Km[np.newaxis, :] * phase_doppler_matrix
+        signal_complex = np.sum(contribution_matrix, axis=1)
+
+        # 7. 添加 AOM 频移和本振光混频
+        # i_h = 2 * R * sqrt(P_LO) * signal_complex * exp(-j * 2 * pi * f_AOM * t)
         phase_aom = np.exp(-2j * np.pi * self.p.freq_aom * self.p.time_axis)
 
-        v_los = wind_u * np.cos(np.radians(self.p.elevation_angle_deg))
-        freq_shift_doppler = -2 * v_los / self.p.wavelength
-        phase_doppler = np.exp(-2j * np.pi * freq_shift_doppler * self.p.time_axis)
-
-        # 6. 计算脉冲功率矩阵 (单脉冲能量)
-        # 修正点：移除 PRF，只用 pulse_energy
-        coeff = self.p.pulse_energy * (2 * np.sqrt(np.log(2))) / (np.sqrt(np.pi) * self.p.pulse_width)
-        pulse_power_matrix = coeff * self.pulse_shape_factor
-
-        # 7. 积分求和
-        E_T_matrix = np.sqrt(pulse_power_matrix)
-        signal_complex = np.sum(E_T_matrix * Km[np.newaxis, :], axis=1)
-
-        # 最终外差电流
         i_h = 2 * self.p.responsivity * np.sqrt(self.p.local_power) * \
-              phase_aom * phase_doppler * signal_complex
+              phase_aom * signal_complex
 
         return i_h
-
 
 # --- 独立验证模块 ---
 if __name__ == "__main__":
@@ -117,7 +113,8 @@ if __name__ == "__main__":
     # 验证 2: 绘制图 2.6 (时域外差信号) - 优化显示
     # ==========================================
     print("正在生成时域外差信号...")
-    i_h = physics.simulate_ideal_signal(wind_u=10.0)
+    test_wind_profile = np.full_like(params.range_axis, 10.0)
+    i_h = physics.simulate_ideal_signal(v_los_profile=test_wind_profile)
 
     dist_axis = params.time_axis * params.c / 2
 
