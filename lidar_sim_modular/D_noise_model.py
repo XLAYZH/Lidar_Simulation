@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from tqdm import tqdm  # 进度条库
+from scipy.interpolate import interp1d
 
 # 导入参数模块和绘图风格
 from A_lidar_params import params
@@ -28,6 +29,16 @@ class NoiseModel:
             # [物理修正] NEP 单位转换 pW -> W
             raw_nep = np.load('nep_fit_smooth.npy')
             self.nep_profile = raw_nep * 1e-12
+
+            # [新增代码] 创建插值函数，用于动态长度生成
+            # 原始数据对应 0 ~ 500MHz
+            orig_freqs = self.p.freqs
+            # 简单的边界保护，防止长度不一致
+            if len(self.nep_profile) != len(orig_freqs):
+                orig_freqs = np.linspace(0, self.p.sample_rate / 2, len(self.nep_profile))
+
+            self.nep_interp = interp1d(orig_freqs, self.nep_profile,
+                                       bounds_error=False, fill_value=(self.nep_profile[0], self.nep_profile[-1]))
         except FileNotFoundError:
             print("Warning: 'nep_fit_smooth.npy' not found. Using zero noise for NEP.")
             self.nep_profile = np.zeros(self.p.points_per_bin)
@@ -43,9 +54,12 @@ class NoiseModel:
                         self.p.bandwidth / self.p.load_resistance
         return shot_power, thermal_power
 
-    def calculate_rin_psd(self):
+    def calculate_rin_psd(self, freqs=None):
         """计算 RIN 电流 PSD (A^2/Hz)"""
-        omega = 2 * np.pi * self.p.freqs
+        if freqs is None:
+            freqs = self.p.freqs
+
+        omega = 2 * np.pi * freqs
         # 避免除零
         den = ((2 * np.pi * self.fr) ** 2 + self.Gamma ** 2 - omega ** 2) ** 2 + (4 * self.Gamma ** 2 * omega ** 2)
         den[den == 0] = 1e-20
@@ -56,25 +70,39 @@ class NoiseModel:
         rin_psd_current = 2 * (self.p.responsivity * self.p.local_power) ** 2 * rin_linear
         return rin_psd_current, RIN_f_db
 
-    def calculate_nep_psd(self):
+    def calculate_nep_psd(self, freqs=None):
         """计算 BDN 电流 PSD (A^2/Hz)"""
-        H_f = 1 / np.sqrt(1 + (self.f_low / self.p.freqs) ** 16) / \
-              np.sqrt(1 + (self.p.freqs / self.f_high) ** 16)
+        if freqs is None:
+            freqs = self.p.freqs
+            nep_vals = self.nep_profile[:len(freqs)]
+        else:
+            nep_vals = self.nep_interp(freqs)
 
-        n_pts = min(len(self.nep_profile), len(self.p.freqs))
-        nep_part = self.nep_profile[:n_pts]
-        resp_part = (self.p.responsivity * H_f)[:n_pts]
+        H_f = 1 / np.sqrt(1 + (self.f_low / freqs) ** 16) / \
+              np.sqrt(1 + (freqs / self.f_high) ** 16)
 
-        nep_psd_current = (nep_part * resp_part) ** 2
+        resp_part = self.p.responsivity * H_f
+
+        nep_psd_current = (nep_vals * resp_part) ** 2
         return nep_psd_current, resp_part
 
-    def simulate_colored_noise_from_psd(self, psd_onesided):
+    def simulate_colored_noise_from_psd(self, psd_onesided, n_samples=None):
         """从 PSD 生成有色噪声时域波形"""
-        df = self.p.sample_rate / self.p.fft_points
+        if n_samples is None:
+            n_samples = self.p.fft_points
+
+        df = self.p.sample_rate / n_samples
         target_power = np.sum(psd_onesided * df)
 
         spec_mag = np.sqrt(psd_onesided)
         spec_double = np.concatenate((spec_mag, spec_mag[::-1]))
+
+        # [新增] 长度对齐保护 (防止奇偶差异)
+        if len(spec_double) > n_samples:
+            spec_double = spec_double[:n_samples]
+        elif len(spec_double) < n_samples:
+            spec_double = np.pad(spec_double, (0, n_samples - len(spec_double)), 'constant')
+
         random_phase = np.exp(1j * 2 * np.pi * np.random.rand(len(spec_double)))
 
         noise_time = np.fft.ifft(spec_double * random_phase).real
@@ -85,16 +113,29 @@ class NoiseModel:
             noise_time *= np.sqrt(target_power / current_var)
         return noise_time
 
-    def generate_total_noise(self):
+    def generate_total_noise(self, n_samples=None):
         """生成组合后的总噪声 (核心接口)"""
+        if n_samples is None:
+            n_samples = self.p.fft_points
+
         shot_p, thermal_p = self.calculate_gaussian_variance()
-        noise_gauss = np.random.normal(0, np.sqrt(shot_p + thermal_p), self.p.fft_points)
+        noise_gauss = np.random.normal(0, np.sqrt(shot_p + thermal_p), n_samples)
 
-        rin_psd, _ = self.calculate_rin_psd()
-        noise_rin = self.simulate_colored_noise_from_psd(rin_psd)
+        # 2. 准备动态频率轴 (用于有色噪声)
+        if n_samples == self.p.fft_points:
+            # 绘图模式：使用默认轴
+            freqs_pos = self.p.freqs
+        else:
+            # 仿真模式：生成高分辨率轴
+            freqs_full = np.fft.fftfreq(n_samples, 1 / self.p.sample_rate)
+            freqs_pos = freqs_full[:n_samples // 2]  # 正频率部分
+            freqs_pos[0] = 1e-10  # 避免除零
 
-        nep_psd, _ = self.calculate_nep_psd()
-        noise_nep = self.simulate_colored_noise_from_psd(nep_psd)
+        rin_psd, _ = self.calculate_rin_psd(freqs_pos)
+        noise_rin = self.simulate_colored_noise_from_psd(rin_psd, n_samples)
+
+        nep_psd, _ = self.calculate_nep_psd(freqs_pos)
+        noise_nep = self.simulate_colored_noise_from_psd(nep_psd, n_samples)
 
         total_noise = noise_gauss + noise_rin + noise_nep
         return noise_rin, noise_gauss, noise_nep, total_noise
