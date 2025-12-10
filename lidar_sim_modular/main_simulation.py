@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm import tqdm  # 进度条
+from tqdm import tqdm
 import os
 
 # 导入所有模块
@@ -11,172 +11,161 @@ from E_wind_field import WindField
 import S_plot_style as plot_style
 
 
-class LidarSimulator:
+class LidarMainSimulator:
     def __init__(self):
-        print("正在初始化雷达仿真系统...")
+        print(">>> 初始化雷达仿真系统...")
         self.p = params
         self.physics = LidarPhysics()
         self.noise_model = NoiseModel()
         self.wind_field = WindField()
 
-        # 尝试加载真实探空数据 (可选)
-        # 如果文件不存在，会自动回退到 Hybrid 模型
-        self.wind_field.load_sounding_data(r"E:\GraduateStu6428\Codes\ObservationData54511\12Z\2025-12-01_12.csv")
+        # 尝试加载探空数据 (可选)
+        sounding_file = r"E:\GraduateStu6428\Codes\ObservationData54511\12Z\2025-12-01_12.csv"
+        try:
+            self.wind_field.load_sounding_data(sounding_file)
+        except:
+            pass
 
-    def run_ppi_scan(self, n_accum=1000):
+    def run_simulation(self, n_accum=1000, scan_mode='PPI', wind_type='real'):
         """
-        执行完整的 PPI 扫描仿真
+        执行仿真
+        参数:
+            n_accum: 累积脉冲数
+            scan_mode: 'PPI' (圆锥扫描) 或 'Staring' (单径向凝视)
+            wind_type: 'real' (探空), 'power_law' (指数律), 'hybrid' (混合), 'constant' (常风速)
         """
-        # 1. 扫描参数
-        azimuths = np.linspace(0, 360, self.p.azimuth_count, endpoint=False)
-        print(f"开始 PPI 扫描: 共 {len(azimuths)} 个方位角, 每个角度累积 {n_accum} 个脉冲")
+        if scan_mode == 'PPI':
+            azimuths = np.linspace(0, 360, self.p.azimuth_count, endpoint=False)
+        else:
+            azimuths = [0.0]
+            print(f">>> 进入凝视模式 (Staring Mode), Azimuth=0°, Wind Type={wind_type}")
 
-        # 2. 结果存储容器
-        # 存储每个方位角的最终 PSD (Azimuth x Frequency)
-        # 我们只保存正频率部分的前半段 (对应 0 ~ fs/2)
-        # 实际上我们通常保存 512 点 (对应 distance bins 的数量，或者 FFT 的一半)
-        ppi_psd_data = np.zeros((len(azimuths), self.p.points_per_bin))
-
-        # 频率轴 (用于绘图)
-        freq_axis = self.p.freqs[:self.p.points_per_bin]
-
-        # PSD 归一化因子 (转换为 A^2/Hz)
+        # 定义距离门参数
+        gate_len = 512
+        n_freq_bins = self.p.fft_points // 2
         psd_norm = 2.0 / (self.p.sample_rate * self.p.fft_points)
 
-        # 3. 扫描循环
-        for i, azi in enumerate(azimuths):
-            print(f"  -> 扫描方位角 {azi:.1f}° ({i + 1}/{len(azimuths)})...")
+        sim_data = None
+        range_gates = None
+        freq_axis = None
 
-            # A. 获取当前方向的径向风速廓线 (Module E)
+        print(f">>> 开始仿真 (模式: {scan_mode}, 风场: {wind_type}, 累积: {n_accum})")
+
+        for i, azi in enumerate(azimuths):
+            if scan_mode == 'PPI':
+                print(f"  -> 扫描方位角 {azi:.1f}° ({i + 1}/{len(azimuths)})")
+
+            # [关键] 这里传入 wind_type
             v_los, _ = self.wind_field.get_radial_velocity(
-                self.p.range_axis,
-                azimuth_deg=azi,
-                elevation_deg=self.p.elevation_angle_deg,
-                wind_type='real'  # 优先使用真实数据，如果没有则自动回退到混合模型
+                self.p.range_axis, azi, self.p.elevation_angle_deg, wind_type=wind_type
             )
 
-            # B. 脉冲累积循环
-            accum_psd = np.zeros(self.p.points_per_bin)
+            accum_spectrogram = None
 
-            for _ in range(n_accum):
-                # 1. 生成纯信号 (Module C)
-                # 注意: 每次都需要重新调用，因为散斑(Speckle)相位是随机的
+            for p_idx in tqdm(range(n_accum), desc="     脉冲累积", leave=False):
+                # 1. 生成物理信号
                 sig_complex = self.physics.simulate_ideal_signal(v_los_profile=v_los)
 
-                # 2. 生成噪声 (Module D)
-                _, _, _, noise_total = self.noise_model.generate_total_noise()
+                # 2. 生成噪声 (动态长度)
+                _, _, _, noise_total = self.noise_model.generate_total_noise(n_samples=len(sig_complex))
 
-                # 3. 叠加 (信号 + 噪声)
-                # [关键] 信噪比控制:
-                # 现在的代码中信号和噪声都是基于物理参数计算的绝对值。
-                # 如果我们要模拟特定的 SNR (比如远距离信噪比低)，这已经隐含在物理模型里了
-                # (信号随距离R^2衰减，噪声恒定)。
-                # 所以直接相加即可。
-                total_signal = sig_complex + noise_total
+                # 3. 信噪比增强 (强制首个距离门 SNR=20dB)
+                if p_idx == 0:
+                    noise_power = np.var(noise_total)
+                    sig_power_peak = np.max(np.abs(sig_complex) ** 2)
+                    target_snr_linear = 100.0  # 20dB
 
-                # 4. FFT & PSD
-                # 截取前 1024 点进行 FFT (对应最远探测距离)
-                # 或者如果 total_signal 长度就是 1024
-                fft_res = np.fft.fft(total_signal, n=self.p.fft_points)
-                psd = np.abs(fft_res[:self.p.points_per_bin]) ** 2
+                    if sig_power_peak > 0:
+                        scale_factor = np.sqrt((noise_power * target_snr_linear) / sig_power_peak)
+                    else:
+                        scale_factor = 1.0
 
-                accum_psd += psd
+                total_signal = (sig_complex * scale_factor) + noise_total
 
-            # C. 平均 & 存储
-            avg_psd = (accum_psd / n_accum) * psd_norm
-            ppi_psd_data[i, :] = avg_psd
+                # 4. 距离门切片与 FFT
+                if accum_spectrogram is None:
+                    num_gates = len(total_signal) // gate_len
+                    accum_spectrogram = np.zeros((num_gates, n_freq_bins))
+                    gate_res_m = (self.p.c * (gate_len / self.p.sample_rate)) / 2
+                    range_gates = np.arange(num_gates) * gate_res_m + gate_res_m / 2
 
-        return azimuths, freq_axis, ppi_psd_data
+                for gate_idx in range(num_gates):
+                    start = gate_idx * gate_len
+                    end = start + gate_len
+                    segment = total_signal[start:end]
 
-    def plot_results(self, azimuths, freq_axis, ppi_data):
-        """绘制论文图 2.16 (3D) 和 2.17 (2D)"""
+                    fft_res = np.fft.fft(segment, n=self.p.fft_points)
+                    psd = np.abs(fft_res[:n_freq_bins]) ** 2
+                    accum_spectrogram[gate_idx, :] += psd
 
-        # 为了展示清晰，我们通常只画某一个方位角的 3D 图 (例如第 0 个)
-        # 或者画所有方位角的叠加? 论文图 2.16 是 "常风速条件下... 3D视图"
-        # 看起来是 频率 vs 距离(距离门) vs 幅度。
-        # 等等，我们的 ppi_data 是 (Azimuth, Frequency)。
-        # 这里的 "Frequency" 轴其实对应着 "Range" (如果是 FMCW 雷达)
-        # 或者 对应着 "Velocity" (如果是脉冲多普勒)。
+            avg_spectrogram = (accum_spectrogram / n_accum) * psd_norm
 
-        # [修正] 论文图 2.16 的横轴是 "频率"，纵轴是 "距离门"。
-        # 这意味着：这并不是 PPI 扫描的结果，而是一个单一方位角下，
-        # 对信号进行 "分段 FFT" (STFT) 得到的结果。
+            if sim_data is None:
+                sim_data = np.zeros((len(azimuths), num_gates, n_freq_bins))
 
-        # 既然我们现在的仿真输出是 1024 点的 FFT，这代表的是整个探测范围内的频谱。
-        # 如果要做图 2.16 (距离分辨的频谱)，我们需要对时域信号做 STFT (短时傅里叶变换)。
+            sim_data[i, :, :] = avg_spectrogram
 
-        print("\n[Info] 正在生成 STFT 以复现图 2.16/2.17 (距离分辨频谱)...")
-        # 重新生成一个单脉冲信号用于展示 STFT
-        # 取第一个方位角的数据
-        v_los, _ = self.wind_field.get_radial_velocity(
-            self.p.range_axis, azimuths[0], self.p.elevation_angle_deg, 'real')
+        freq_axis = np.fft.fftfreq(self.p.fft_points, 1 / self.p.sample_rate)[:n_freq_bins] / 1e6
 
-        # 我们需要一个长时域信号来做 STFT 吗？
-        # 目前的 signal 是 1024 点 (对应 3840m 往返时间)。
-        # 如果要做距离分辨，需要把 1024 点切成更小的段?
-        # 不，1024 点只有 1us。通常脉冲多普勒雷达为了获得距离分辨，
-        # 是对每个距离门分别采样的。
+        return {
+            'azimuths': azimuths,
+            'range_gates': range_gates,
+            'freq_axis': freq_axis,
+            'data': sim_data
+        }
 
-        # [代码逻辑修正]: 我们的仿真目前是 "全波形 FFT"。
-        # 要得到 "距离门 vs 频率" 的图，我们需要改变信号处理方式：
-        # 我们其实已经生成了 (Time x Range) 的矩阵 E_T_matrix。
-        # 但最终输出的是混频后的 1D 时域信号 i_h(t)。
+    def plot_figure_2_16(self, res):
+        print("绘制图 2.16 (3D瀑布图)...")
+        data = res['data'][0]
+        start_idx = 5
+        data_cut = data[:, start_idx:]
+        range_axis = res['range_gates'] / 1000.0
+        freq_axis_cut = res['freq_axis'][start_idx:]
 
-        # 在实际雷达中，为了获得距离分辨，我们通常是对回波进行 "滑窗 FFT"。
-        # 窗口宽度 = 脉冲宽度。
+        X, Y = np.meshgrid(freq_axis_cut, range_axis)
+        # 使用 dB 标度
+        Z_log = 10 * np.log10(data_cut + 1e-30)
 
-        # 让我们对第 0 个方位角的累积信号做滑窗 FFT
-        n_gates = 50  # 论文提到 50 个距离门
-        gate_len = int(self.p.fft_points / n_gates)  # 1024 / 50 approx 20 点? 太少了。
-        # 论文参数: 距离门采样点数 512 ?? (表 2.1)
-        # 表 2.1: FFT 点数 1024。距离门采样点数 512。
-        # 这意味着每个距离门都做了 1024 点 FFT (补零)? 或者是滑动?
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        surf = ax.plot_surface(X, Y, Z_log, cmap='jet', linewidth=0, antialiased=False)
 
-        # 既然我们无法完全确定论文的 STFT 细节，我们这里用一个简单的滑动窗口来近似展示。
-        # 或者，直接展示 PPI 数据的 2D 图 (方位角 vs 频率/速度)。
+        ax.set_xlabel('频率 (MHz)', fontproperties=plot_style.style.zh_font)
+        ax.set_ylabel('距离 (km)', fontproperties=plot_style.style.zh_font)
+        ax.set_zlabel('PSD (dB)', fontproperties=plot_style.style.zh_font)
+        ax.set_title("图 2.16 仿真复现 (常风速 10m/s)", fontproperties=plot_style.style.zh_font)
 
-        # --- 方案 B: 绘制 方位角 vs 频率 (VAD 扫描图) ---
-        # 这是验证风场反演最直观的图。
-
-        f_MHz = freq_axis / 1e6
-
-        plt.figure(figsize=(10, 6))
-        # X轴: 频率(对应速度), Y轴: 方位角
-        # 使用 pcolormesh
-        plt.pcolormesh(f_MHz, azimuths, ppi_data, cmap='jet', shading='auto')
-        plt.colorbar(label='PSD ($A^2/Hz$)')
-
-        plot_style.style.apply_standard_layout(plt.gcf(), plt.gca(),
-                                               title="PPI 扫描频谱图 (VAD)",
-                                               xlabel="频率 (MHz)",
-                                               ylabel="方位角 (deg)")
+        ax.view_init(elev=40, azim=-60)
         plt.show()
 
-        # --- 方案 C: 简单的 3D 频谱图 (针对某一个方位角) ---
-        fig = plt.figure(figsize=(10, 6))
-        ax = fig.add_subplot(111, projection='3d')
+    def plot_figure_2_17(self, res):
+        print("绘制图 2.17 (2D伪彩图)...")
+        data = res['data'][0]
+        start_idx = 5
+        data_cut = data[:, start_idx:]
+        freq_axis_cut = res['freq_axis'][start_idx:]
+        range_gates = res['range_gates']
 
-        # 只画第 0 个方位角
-        psd_0 = ppi_data[0, :]
-        ax.plot(f_MHz, psd_0, zs=0, zdir='y', color='r')
+        data_norm = data_cut / np.max(data_cut, axis=1, keepdims=True)
 
-        # 画第 4 个 (90度)
-        psd_90 = ppi_data[4, :]
-        ax.plot(f_MHz, psd_90, zs=90, zdir='y', color='g')
+        plt.figure(figsize=(10, 6))
+        plt.pcolormesh(freq_axis_cut, range_gates, data_norm, cmap='jet', shading='auto')
+        plt.colorbar(label='归一化 PSD')
 
-        ax.set_xlabel('Frequency (MHz)')
-        ax.set_ylabel('Azimuth (deg)')
-        ax.set_zlabel('PSD')
-        ax.set_title("不同方位的功率谱 (3D View)", fontproperties=plot_style.style.zh_font)
+        plot_style.style.apply_standard_layout(plt.gcf(), plt.gca(),
+                                               title="图 2.17 仿真复现 (常风速)",
+                                               xlabel="频率 (MHz)",
+                                               ylabel="距离 (m)")
+        plt.xlim(50, 200)
         plt.show()
 
 
 if __name__ == "__main__":
-    sim = LidarSimulator()
-    # 运行扫描 (为节省时间，演示时可将 n_accum 设小一点，如 100)
-    azis, freqs, data = sim.run_ppi_scan(n_accum=100)
-    sim.plot_results(azis, freqs, data)
+    sim = LidarMainSimulator()
 
-    # 保存数据 (为深度学习做准备)
-    np.savez("lidar_dataset_sample.npz", azimuths=azis, freqs=freqs, psd=data)
-    print("数据已保存为 lidar_dataset_sample.npz")
+    # [修改] 使用 'constant' 风场进行测试
+    # 理论上应该看到一条笔直的信号线
+    results = sim.run_simulation(n_accum=100, scan_mode='Staring', wind_type='constant')
+
+    sim.plot_figure_2_16(results)
+    sim.plot_figure_2_17(results)
