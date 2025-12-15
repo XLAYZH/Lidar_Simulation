@@ -87,10 +87,10 @@ class LidarPhysics:
         # i_h = 2 * R * sqrt(P_LO) * signal_complex * exp(-j * 2 * pi * f_AOM * t)
         phase_aom = np.exp(-2j * np.pi * self.p.freq_aom * self.p.time_axis)
 
-        i_h = 2 * self.p.responsivity * np.sqrt(self.p.local_power) * \
+        i_h_complex = 2 * self.p.responsivity * np.sqrt(self.p.local_power) * \
               phase_aom * signal_complex
 
-        return i_h
+        return np.real(i_h_complex)
 
 # --- 独立验证模块 ---
 if __name__ == "__main__":
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     dist_axis = params.time_axis * params.c / 2
 
     # [关键优化]：单位转换为 微安 (uA)
-    i_h_uA = np.real(i_h) * 1e6
+    i_h_uA = i_h * 1e6
 
     # [关键优化]：动态计算 Y 轴范围
     # 获取绝对值的最大值，并稍微留一点余量 (例如 1.1 倍)
