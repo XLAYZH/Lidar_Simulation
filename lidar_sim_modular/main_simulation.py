@@ -137,7 +137,7 @@ class LidarMainSimulator:
 
         # [关键步骤] 切除前 5 MHz (去除 RIN 噪声墙)
         # 频率分辨率 ~1MHz, 切掉前 5 个点
-        cut_idx = 5
+        cut_idx = 0
 
         data_cut = data[:, cut_idx:]
         freq_axis_cut = res['freq_axis'][cut_idx:]
@@ -146,6 +146,10 @@ class LidarMainSimulator:
         # 转换为 dB (对数坐标才能看清弱信号)
         # 加 1e-30 防止 log(0)
         Z_dB = 10 * np.log10(data_cut + 1e-30)
+        # [关键] 计算噪声的平均水平，用于设定色标
+        # 取远处无信号区域的平均值
+        noise_mean_db = np.mean(Z_dB[-10:, :])
+        print(f"噪声基底平均水平: {noise_mean_db:.2f} dB")
 
         # 网格化
         X, Y = np.meshgrid(freq_axis_cut, range_axis)
@@ -153,8 +157,10 @@ class LidarMainSimulator:
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
 
+        vmin = noise_mean_db - 5
+        vmax = noise_mean_db + 10
         # 绘制
-        surf = ax.plot_surface(X, Y, Z_dB, cmap='jet', linewidth=0, antialiased=False)
+        surf = ax.plot_surface(X, Y, Z_dB, cmap='jet', linewidth=0, antialiased=False, vmin=vmin, vmax=vmax)
 
         ax.set_xlabel('Frequency (MHz)', fontproperties=plot_style.style.zh_font)
         ax.set_ylabel('Distance (km)', fontproperties=plot_style.style.zh_font)
@@ -173,7 +179,7 @@ class LidarMainSimulator:
         print("正在绘制图 2.17 (2D)...")
         data = res['data'][0]
 
-        cut_idx = 5
+        cut_idx = 0
         data_cut = data[:, cut_idx:]
         freq_axis_cut = res['freq_axis'][cut_idx:]
         range_gates = res['range_gates']
@@ -191,7 +197,7 @@ class LidarMainSimulator:
                                                xlabel="Frequency (MHz)", ylabel="Distance (m)")
 
         # 聚焦信号区域 (AOM 120MHz 附近)
-        plt.xlim(50, 200)
+        plt.xlim(0, 500)
         plt.ylim(0, 4000)
         plt.show()
 
@@ -202,7 +208,7 @@ if __name__ == "__main__":
     # 1. 运行 "凝视模式" (Staring)
     # 目的: 生成单一方向的距离-频率图 (图 2.16/2.17)
     # n_accum=100 足够看清信号，若需极高质量可设为 1000
-    results = sim.run_simulation(n_accum=100, scan_mode='Staring')
+    results = sim.run_simulation(n_accum=50, scan_mode='Staring')
 
     # 2. 绘图
     sim.plot_figure_2_16(results)
