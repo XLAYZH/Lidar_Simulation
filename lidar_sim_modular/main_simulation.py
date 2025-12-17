@@ -1,9 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from tqdm import tqdm
 import os
 
-# 导入核心模块
+# 导入底层模块
 from A_lidar_params import params
 from C_lidar_physics import LidarPhysics
 from D_noise_model import NoiseModel
@@ -11,207 +12,311 @@ from E_wind_field import WindField
 import S_plot_style as plot_style
 
 
-class LidarMainSimulator:
+class LidarSimulator:
     def __init__(self):
-        print(">>> 初始化雷达仿真系统...")
+        print(">>> 初始化激光雷达仿真器...")
         self.p = params
         self.physics = LidarPhysics()
         self.noise_model = NoiseModel()
         self.wind_field = WindField()
 
         # 尝试加载探空数据
-        sounding_file = r"E:\GraduateStu6428\Codes\ObservationData54511\12Z\2025-12-01_12.csv"
+        self.sounding_path = r"E:\GraduateStu6428\Codes\ObservationData54511\12Z\2025-12-01_12.csv"
         try:
-            self.wind_field.load_sounding_data(sounding_file)
+            self.wind_field.load_sounding_data(self.sounding_path)
         except:
-            pass
+            print("注意: 未找到探空数据，将仅使用常风速或模型风场。")
 
-    def run_simulation(self, n_accum=1000, scan_mode='PPI'):
+    def _get_snr_profile_linear(self, num_gates):
         """
-        执行主仿真
+        生成沿距离门衰减的信噪比曲线 (-10dB -> -25dB)
+        返回: 线性信噪比 (Signal_Power / Noise_Power)
         """
-        # 1. 扫描参数配置
-        if scan_mode == 'PPI':
-            azimuths = np.linspace(0, 360, self.p.azimuth_count, endpoint=False)
-        else:  # Staring (凝视模式，用于调试或画图2.16)
-            azimuths = [0.0]
-            print(">>> 进入凝视模式 (Azimuth=0°)")
+        snr_start_db = -10.0
+        snr_end_db = -25.0
 
-        # 2. 距离门与FFT参数
-        # 表2.1: 距离门采样点数 512, FFT点数 1024
-        gate_len = 512
-        n_fft = self.p.fft_points  # 1024
-        n_freq_bins = n_fft // 2  # 只取正频率 (512点)
+        # 生成线性的 dB 衰减序列
+        snr_db_axis = np.linspace(snr_start_db, snr_end_db, num_gates)
 
-        # PSD 归一化系数 (转换为 A^2/Hz)
-        psd_norm = 2.0 / (self.p.sample_rate * n_fft)
+        # 转换为线性功率比: SNR_lin = 10^(SNR_db / 10)
+        snr_linear = 10 ** (snr_db_axis / 10.0)
+        return snr_linear
 
-        # 3. 初始化结果容器 (方位角 x 距离门 x 频率)
-        # 此时还不知道距离门数量，先设为 None
-        sim_data = None
-        range_gates = None
+    def simulate_single_radial(self, azimuth=0.0, wind_mode='constant', n_accum=50):
+        """
+        核心功能：仿真单个径向（单个方位角）的数据
+        用于快速验证波形和频谱是否正确
+        """
+        # --- 1. 参数准备 ---
+        gate_len = 512  # 距离门长度
+        n_fft = self.p.fft_points  # 1024点
+        n_freq = n_fft // 2
 
-        print(f">>> 开始仿真 (模式: {scan_mode}, 累积: {n_accum})")
+        # 计算距离分辨率
+        # Range = c * t / 2 = c * (gate_len / fs) / 2
+        range_res = (self.p.c * (gate_len / self.p.sample_rate)) / 2
 
-        # --- 方位角循环 ---
-        for i, azi in enumerate(azimuths):
-            if scan_mode == 'PPI':
-                print(f"  -> 扫描方位角 {azi:.1f}° ({i + 1}/{len(azimuths)})")
+        # 跑一次空的物理仿真，获取信号总长度，从而确定距离门数量
+        dummy_sig = self.physics.simulate_ideal_signal(np.zeros_like(self.p.range_axis))
+        total_points = len(dummy_sig)
+        num_gates = total_points // gate_len
 
-            # A. 获取当前方向的径向风速
-            v_los, _ = self.wind_field.get_radial_velocity(
-                self.p.range_axis, azi, self.p.elevation_angle_deg, wind_type='constant'
-            )
+        # 生成距离轴 (取门中心)
+        range_axis = (np.arange(num_gates) + 0.5) * range_res
 
-            # 临时累积器 (用于存放当前方位的平均谱)
-            accum_spectrogram = None
+        # 生成目标 SNR 曲线 (-10dB 到 -25dB)
+        snr_profile = self._get_snr_profile_linear(num_gates)
 
-            # --- 脉冲累积循环 ---
-            for p_idx in tqdm(range(n_accum), desc="     脉冲累积", leave=False):
-                # 1. 生成物理信号 (长时域)
-                sig_complex = self.physics.simulate_ideal_signal(v_los_profile=v_los)
+        # PSD 归一化系数 (从 FFT模平方 -> A^2/Hz)
+        psd_norm_factor = 2.0 / (self.p.sample_rate * n_fft)
 
-                # 2. 生成噪声 (动态长度)
-                _, _, _, noise_total = self.noise_model.generate_total_noise(n_samples=len(sig_complex))
+        print(f">>> 开始单径向仿真: Azimuth={azimuth}°, Mode={wind_mode}, Accum={n_accum}")
+        print(f"    距离门数: {num_gates}, 范围: {range_axis[0]:.1f}m - {range_axis[-1]:.1f}m")
 
-                # 3. 信噪比增强 (复现论文 2.4.3)
-                # 仅在第一个脉冲计算缩放系数，后续保持一致以节省计算
-                if p_idx == 0:
-                    noise_p = np.var(noise_total)
-                    sig_p_peak = np.max(np.abs(sig_complex) ** 2)
-                    target_snr = 100.0  # 20dB
+        # 获取该方向的径向风速
+        v_los, _ = self.wind_field.get_radial_velocity(
+            self.p.range_axis, azimuth, self.p.elevation_angle_deg, wind_type=wind_mode
+        )
 
-                    if sig_p_peak > 0:
-                        scale_k = np.sqrt((noise_p * target_snr) / sig_p_peak)
-                    else:
-                        scale_k = 1.0
+        # 初始化累积容器
+        psd_accum = np.zeros((num_gates, n_freq))
 
-                total_signal = (sig_complex * scale_k) + noise_total
-
-                # 4. 距离门切片与 FFT
-                # 首次运行时确定维度
-                if accum_spectrogram is None:
-                    num_gates = len(total_signal) // gate_len
-                    accum_spectrogram = np.zeros((num_gates, n_freq_bins))
-
-                    # 计算距离轴
-                    gate_time = gate_len / self.p.sample_rate
-                    gate_res_m = (self.p.c * gate_time) / 2
-                    range_gates = np.arange(num_gates) * gate_res_m + gate_res_m / 2
-
-                # 对每个距离门做 FFT
-                for gate_idx in range(num_gates):
-                    seg = total_signal[gate_idx * gate_len: (gate_idx + 1) * gate_len]
-                    # 补零 FFT (512 -> 1024)
-                    fft_val = np.fft.fft(seg, n=n_fft)
-                    # 累加功率谱
-                    accum_spectrogram[gate_idx, :] += np.abs(fft_val[:n_freq_bins]) ** 2
-
-            # C. 平均与存储
-            avg_spectrogram = (accum_spectrogram / n_accum) * psd_norm
-
-            # 初始化总数据矩阵
-            if sim_data is None:
-                sim_data = np.zeros((len(azimuths), num_gates, n_freq_bins))
-
-            sim_data[i, :, :] = avg_spectrogram
-
-        # 频率轴 (MHz)
-        freq_axis = np.fft.fftfreq(n_fft, 1 / self.p.sample_rate)[:n_freq_bins] / 1e6
-
-        return {
-            'azimuths': azimuths,
-            'range_gates': range_gates,
-            'freq_axis': freq_axis,
-            'data': sim_data  # Shape: [Azi, Gate, Freq]
+        # 用于波形验证的临时存储 (只存第0个脉冲)
+        debug_waveforms = {
+            'sig_components': [],  # 存放归一化后的信号分量
+            'noise_components': [],  # 存放噪声分量
+            'snr_targets': []  # 存放目标SNR
         }
 
-    def plot_figure_2_16(self, res):
+        # --- 2. 脉冲累积循环 ---
+        for p_idx in tqdm(range(n_accum), desc="Processing Pulses"):
+
+            # A. 生成全长物理外差信号
+            i_h_full = self.physics.simulate_ideal_signal(v_los_profile=v_los)
+
+            # B. 逐距离门处理
+            for g in range(num_gates):
+                # 切片索引
+                idx_start = g * gate_len
+                idx_end = idx_start + gate_len
+
+                # 1. 获取信号切片并归一化
+                # 为了严格控制 SNR，我们需要消除物理信号自带的 1/R^2 衰减影响，
+                # 将其视为标准波形 i_h(t)，然后乘上 sqrt(SNR) 系数
+                i_h_slice = i_h_full[idx_start:idx_end]
+                p_h = np.var(i_h_slice)
+
+                if p_h > 1e-20:
+                    i_h_norm = i_h_slice / np.sqrt(p_h)  # 归一化为单位功率
+                else:
+                    i_h_norm = np.zeros_like(i_h_slice)
+
+                # 2. 生成该门的独立噪声
+                _, _, _, i_n_slice = self.noise_model.generate_total_noise(n_samples=gate_len)
+                p_n = np.var(i_n_slice)
+
+                # 3. 计算叠加系数 (式 2.36)
+                # i(t) = sqrt(SNR) * i_h + i_n
+                # 目标: Signal_Power = SNR_linear * Noise_Power
+                snr_lin = snr_profile[g]
+                sig_coeff = np.sqrt(snr_lin * p_n)
+
+                i_total = (sig_coeff * i_h_norm) + i_n_slice
+
+                # (仅针对第0个脉冲) 保存波形数据用于后续验证1
+                if p_idx == 0:
+                    debug_waveforms['sig_components'].append(sig_coeff * i_h_norm)
+                    debug_waveforms['noise_components'].append(i_n_slice)
+                    debug_waveforms['snr_targets'].append(snr_lin)
+
+                # 4. FFT 变换
+                fft_res = np.fft.fft(i_total, n=n_fft)
+                psd_gate = np.abs(fft_res[:n_freq]) ** 2
+
+                # 累积
+                psd_accum[g, :] += psd_gate
+
+        # --- 3. 平均与归一化 ---
+        # avg_psd = (psd_accum / n_accum) * psd_norm_factor
+        avg_psd = psd_accum
+
+        # 生成频率轴 (MHz)
+        freq_axis = np.fft.fftfreq(n_fft, 1 / self.p.sample_rate)[:n_freq] / 1e6
+
+        return {
+            'data': avg_psd,  # [Gate, Freq]
+            'range_axis': range_axis,
+            'freq_axis': freq_axis,
+            'debug_waveforms': debug_waveforms  # 包含时域波形数据
+        }
+
+    # =========================================================
+    # 验证绘图函数 (英文标题/图例)
+    # =========================================================
+
+    def verify_1_spectral_comparison(self, res):
         """
-        复现图 2.16 (3D 瀑布图)
-        展示: 第0个方位角, 距离 vs 频率 vs 功率(dB)
-        关键: 必须切除低频 DC/RIN，否则看不见信号
+        [Verification 1 - Modified]
+        Frequency Domain Comparison at Near, Mid, and Far gates.
+        Purpose: To verify that the useful signal peak decays with range,
+                 while the noise floor remains constant.
         """
-        print("正在绘制图 2.16 (3D)...")
-        data = res['data'][0]  # 取第 0 个方位角 [Gates, Freqs]
+        print("\n[Verification 1] Plotting Frequency Domain Spectra...")
 
-        # [关键步骤] 切除前 5 MHz (去除 RIN 噪声墙)
-        # 频率分辨率 ~1MHz, 切掉前 5 个点
-        cut_idx = 0
+        waveforms = res['debug_waveforms']
+        num_gates = len(waveforms['sig_components'])
+        n_fft = self.p.fft_points
+        fs = self.p.sample_rate
 
-        data_cut = data[:, cut_idx:]
-        freq_axis_cut = res['freq_axis'][cut_idx:]
-        range_axis = res['range_gates'] / 1000.0  # km
+        # Select 3 representative gates
+        gates_idx = [2, num_gates // 2, num_gates - 5]
+        labels = ['Near Range (High SNR)', 'Mid Range (Mid SNR)', 'Far Range (Low SNR)']
 
-        # 转换为 dB (对数坐标才能看清弱信号)
-        # 加 1e-30 防止 log(0)
-        Z_dB = 10 * np.log10(data_cut + 1e-30)
-        # [关键] 计算噪声的平均水平，用于设定色标
-        # 取远处无信号区域的平均值
-        noise_mean_db = np.mean(Z_dB[-10:, :])
-        print(f"噪声基底平均水平: {noise_mean_db:.2f} dB")
+        # Calculate Frequency Axis (MHz)
+        freq_axis = np.fft.fftfreq(n_fft, 1 / fs)[:n_fft // 2] / 1e6
 
-        # 网格化
-        X, Y = np.meshgrid(freq_axis_cut, range_axis)
+        fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
+
+        for i, g in enumerate(gates_idx):
+            ax = axes[i]
+
+            # 1. Retrieve Time Domain Snapshots (Single Pulse)
+            sig_t = waveforms['sig_components'][g]  # Scaled Signal
+            noise_t = waveforms['noise_components'][g]  # Noise
+            total_t = sig_t + noise_t
+
+            # 2. Perform FFT (to view in Frequency Domain)
+            # Normalized to match the physical units A^2/Hz approx
+            norm = 2.0 / (fs * n_fft)
+
+            fft_total = np.fft.fft(total_t, n=n_fft)
+            psd_total = np.abs(fft_total[:n_fft // 2]) ** 2 * norm
+
+            fft_noise = np.fft.fft(noise_t, n=n_fft)
+            psd_noise = np.abs(fft_noise[:n_fft // 2]) ** 2 * norm
+
+            # 3. Plot
+            # Plot Noise Floor Reference
+            ax.plot(freq_axis, psd_noise, color='gray', alpha=0.4, linewidth=1, label='Noise Floor Only')
+            # Plot Total Signal
+            ax.plot(freq_axis, psd_total, color='blue', alpha=0.9, linewidth=1.5, label='Total Signal (Sig+Noise)')
+
+            # Annotate Target SNR
+            target_snr = waveforms['snr_targets'][g]
+            target_snr_db = 10 * np.log10(target_snr)
+
+            ax.set_title(f"{labels[i]} - Gate {g} - Target SNR: {target_snr_db:.1f} dB")
+            ax.set_ylabel("PSD ($A^2/Hz$)")
+            ax.legend(loc='upper right')
+            ax.grid(True, alpha=0.3)
+
+            # Highlight the Signal Peak (around 120MHz or Doppler shifted)
+            # Find peak in the signal region (e.g., 50-200MHz) to draw attention
+            peak_idx = np.argmax(psd_total)
+            ax.plot(freq_axis[peak_idx], psd_total[peak_idx], 'rx')
+
+            if i == 2:
+                ax.set_xlabel("Frequency (MHz)")
+
+        plt.suptitle("Spectra at Different Ranges",fontsize=14)
+        plt.tight_layout()
+        plt.show()
+
+    def verify_2_3d_psd(self, res):
+        """
+        验证2: 功率谱仿真数据三维展示
+        X: Frequency, Y: Range Gate, Z: PSD (A^2/Hz)
+        """
+        print("\n[Verification 2] Plotting 3D PSD (Linear Scale)...")
+
+        data = res['data']  # [Gate, Freq]
+        freqs = res['freq_axis']
+        ranges = res['range_axis']
+
+        # 创建网格
+        X, Y = np.meshgrid(freqs, ranges)
+        Z = data  # 线性单位 A^2/Hz
 
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
 
-        vmin = noise_mean_db - 5
-        vmax = noise_mean_db + 10
-        # 绘制
-        surf = ax.plot_surface(X, Y, Z_dB, cmap='jet', linewidth=0, antialiased=False, vmin=vmin, vmax=vmax)
+        # 绘制曲面
+        surf = ax.plot_surface(X, Y, Z, cmap='jet', linewidth=0, antialiased=False)
 
-        ax.set_xlabel('Frequency (MHz)', fontproperties=plot_style.style.zh_font)
-        ax.set_ylabel('Distance (km)', fontproperties=plot_style.style.zh_font)
-        ax.set_zlabel('PSD (dB)', fontproperties=plot_style.style.zh_font)
-        ax.set_title("3D Spectrogram of CDWL, Costant Wind Speed", fontproperties=plot_style.style.zh_font)
+        # 英文标签
+        ax.set_xlabel('Frequency (MHz)')
+        ax.set_ylabel('Range Gate (m)')
+        ax.set_zlabel('PSD ($A^2/Hz$)')
+        ax.set_title("3D Power Spectral Density", fontsize=12)
 
-        # 视角调整
-        ax.view_init(elev=35, azim=-70)
+        # 添加色条
+        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label='PSD ($A^2/Hz$)')
+
+        # 调整视角以便观察
+        ax.view_init(elev=30, azim=-60)
         plt.show()
 
-    def plot_figure_2_17(self, res):
+    def verify_3_2d_heatmap(self, res):
         """
-        复现图 2.17 (2D 伪彩图)
-        展示: 距离 vs 频率
+        验证3: 功率谱二维展示 (归一化)
+        横轴: Frequency, 纵轴: Range Gate, Color: Normalized PSD
         """
-        print("正在绘制图 2.17 (2D)...")
-        data = res['data'][0]
+        print("\n[Verification 3] Plotting 2D Normalized Spectrogram...")
 
-        cut_idx = 0
-        data_cut = data[:, cut_idx:]
-        freq_axis_cut = res['freq_axis'][cut_idx:]
-        range_gates = res['range_gates']
+        data = res['data']
+        freqs = res['freq_axis']
+        ranges = res['range_axis']
 
-        # 归一化 (让每个距离门的峰值都亮起来，方便观察频移)
-        # axis=1 表示沿频率轴归一化
-        data_norm = data_cut / np.max(data_cut, axis=1, keepdims=True)
+        # 归一化处理: 每个距离门的数据除以该门的最大值
+        # 这样可以消除距离衰减的影响，清晰看到远处微弱信号的频移
+        max_per_gate = np.max(data, axis=1, keepdims=True)
+        # 防止除零
+        max_per_gate[max_per_gate == 0] = 1.0
+        data_norm = data / max_per_gate
 
         plt.figure(figsize=(10, 6))
-        plt.pcolormesh(freq_axis_cut, range_gates, data_norm, cmap='jet', shading='auto')
-        plt.colorbar(label='Normalized PSD')
 
-        plot_style.style.apply_standard_layout(plt.gcf(), plt.gca(),
-                                               title="Normalized PSD",
-                                               xlabel="Frequency (MHz)", ylabel="Distance (m)")
+        # 绘制伪彩图
+        plt.pcolormesh(freqs, ranges, data_norm, cmap='jet', shading='auto')
 
-        # 聚焦信号区域 (AOM 120MHz 附近)
-        plt.xlim(0, 500)
-        plt.ylim(0, 4000)
+        # 英文标签
+        plt.colorbar(label='Normalized PSD (0-1)')
+        plt.xlabel('Frequency (MHz)')
+        plt.ylabel('Range Gate (m)')
+        plt.title("2D Normalized Spectrogram", fontsize=12)
+
+        # 限制显示范围 (聚焦 0-250MHz)
+        plt.xlim(0, 250)
+        plt.ylim(0, ranges[-1])
+        plt.grid(True, alpha=0.3, linestyle='--')
         plt.show()
 
 
 if __name__ == "__main__":
-    sim = LidarMainSimulator()
+    # 实例化仿真器
+    sim = LidarSimulator()
 
-    # 1. 运行 "凝视模式" (Staring)
-    # 目的: 生成单一方向的距离-频率图 (图 2.16/2.17)
-    # n_accum=100 足够看清信号，若需极高质量可设为 1000
-    results = sim.run_simulation(n_accum=50, scan_mode='Staring')
+    # === 阶段 1: 单径向调试 (Single Radial Debug) ===
+    # 设定参数: 常风速, 累积50次用于快速查看
+    print("\n=== STEP 1: Running Single Radial Simulation for Verification ===")
+    radial_results = sim.simulate_single_radial(azimuth=0.0, wind_mode='constant', n_accum=50)
 
-    # 2. 绘图
-    sim.plot_figure_2_16(results)
-    sim.plot_figure_2_17(results)
+    # 立即执行三个验证
+    sim.verify_1_spectral_comparison(radial_results)  # 验证波形叠加公式是否正确
+    sim.verify_2_3d_psd(radial_results)  # 验证能量分布 (线性坐标)
+    sim.verify_3_2d_heatmap(radial_results)  # 验证频率提取 (归一化坐标)
 
-    print("\n提示: 如果您想看 PPI VAD 图 (S形曲线)，请将 scan_mode 改为 'PPI'")
+    # === 阶段 2: 全方位扫描 (Full Scan) ===
+    # 只有当上述图形正确后，您再取消下面的注释进行全扫描
+    """
+    print("\n=== STEP 2: Running Full 16-Azimuth Scan ===")
+    full_scan_data = []
+    azimuths = np.linspace(0, 360, 16, endpoint=False)
+
+    for azi in azimuths:
+        res = sim.simulate_single_radial(azimuth=azi, wind_mode='constant', n_accum=50)
+        full_scan_data.append(res['data'])
+
+    full_scan_data = np.array(full_scan_data) # [16, Gates, Freq]
+    print("Full scan complete. Data shape:", full_scan_data.shape)
+    """
