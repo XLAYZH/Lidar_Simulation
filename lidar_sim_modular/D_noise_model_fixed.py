@@ -10,7 +10,7 @@ import S_plot_style as plot_style
 
 class NoiseModel:
     """
-    噪声仿真模块（修订版）
+    噪声仿真模块（可直接运行版）
 
     目标：
     1. 用一侧 PSD 严格生成实值高斯随机过程；
@@ -19,10 +19,11 @@ class NoiseModel:
     4. 与主仿真程序接口保持兼容；
     5. 保留原始 D_noise_model.py 中的全部独立验证绘图功能。
 
-    说明：
-    - 本模块返回的是“接收机输出电流噪声”的时域实现；
-    - 所有 PSD 均采用一侧定义，单位 A^2/Hz；
-    - 频域响应中包含一个近似的接收机通带响应，用于体现低频截止和高频滚降。
+    当前默认建模约定：
+    - 散粒噪声、热噪声：按“理想白噪声源”处理，默认不乘平衡探测器响应；
+    - RIN：保留其解析频谱形状，默认不再额外乘接收机响应；
+    - BDN：作为接收机相关噪声，默认保留接收机响应整形；
+    - 所有 PSD 均为一侧定义，单位 A^2/Hz。
     """
 
     def __init__(self):
@@ -55,6 +56,18 @@ class NoiseModel:
         self.nep_profile = None
         self.nep_interp = None
         self._load_nep_profile()
+
+    def print_model_configuration(self):
+        """打印当前噪声模型配置，便于核查白噪声是否被接收机响应整形。"""
+        print("\n=== Noise model configuration ===")
+        print(f"shape_white_noise = {self.shape_white_noise}  (False 表示散粒噪声/热噪声保持平坦 PSD)")
+        print(f"shape_rin         = {self.shape_rin}  (False 表示 RIN 保持解析谱型本身)")
+        print(f"shape_bdn         = {self.shape_bdn}  (True  表示 BDN 保留接收机响应整形)")
+        if self.nep_interp is None:
+            print("NEP profile        = not loaded")
+        else:
+            print("NEP profile        = loaded" if np.any(self.nep_profile > 0) else "NEP profile        = zero fallback")
+        print("=================================\n")
 
     # ------------------------------------------------------------------
     # 基础频率响应与 PSD 定义
@@ -154,8 +167,13 @@ class NoiseModel:
 
     def calculate_gaussian_variance(self):
         """
-        返回散粒噪声与热噪声在当前接收机响应下的总方差（A^2）。
-        这是对白噪声量级的积分结果，主要用于与旧版接口兼容和快速检查。
+        返回散粒噪声与热噪声在当前配置下的总方差（A^2）。
+
+        说明：
+        - 当 self.shape_white_noise=False 时，对应理想白噪声源在当前仿真带宽内的积分方差；
+        - 当 self.shape_white_noise=True 时，对应经接收机响应整形后的积分方差。
+
+        该函数主要用于与旧版接口兼容和快速检查。
         """
         freqs = self.frequency_axis(self.p.fft_points)
         df = freqs[1] - freqs[0]
@@ -539,4 +557,5 @@ class NoiseModel:
 
 if __name__ == "__main__":
     nm = NoiseModel()
+    nm.print_model_configuration()
     nm.run_all_validations()
