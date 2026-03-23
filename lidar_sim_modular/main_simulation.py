@@ -286,7 +286,7 @@ class LidarSimulator:
         plt.title("2D Normalized Spectrogram", fontsize=12)
 
         # 限制显示范围 (聚焦 0-250MHz)
-        plt.xlim(0, 250)
+        # plt.xlim(0, 250)
         plt.ylim(0, ranges[-1])
         plt.grid(True, alpha=0.3, linestyle='--')
         plt.show()

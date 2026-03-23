@@ -57,7 +57,7 @@ class LidarPhysics:
         Km_sq_expectation = transmittance_squared * beta_m * geometric_factor
         # 生成瑞利分布幅度 & 均匀分布相位
         rand_phase = np.random.uniform(0, 2 * np.pi, len(Km_sq_expectation))
-        rand_amp = np.random.rayleigh(np.sqrt(Km_sq_expectation))
+        rand_amp = np.random.rayleigh(np.sqrt(Km_sq_expectation / 2.0))
         Km = rand_amp * np.exp(1j * rand_phase)  # 复振幅向量 (N_layers,)
 
         # 4. 脉冲能量系数
@@ -69,13 +69,17 @@ class LidarPhysics:
         # 针对每个距离门计算不同的多普勒频移
         if v_los_profile is None:
             v_los_profile = np.zeros_like(self.p.range_axis)
+        elif len(v_los_profile) != len(self.p.range_axis):
+            raise ValueError("v_los_profile 的长度必须与 range_axis 一致")
 
         # f_d = -2 * v_r / lambda (N_layers,)
         freq_shifts = -2 * v_los_profile / self.p.wavelength
 
         # 构建相位矩阵: exp(-j * 2 * pi * f_d * t)
         # 利用广播机制: (N_time, 1) * (1, N_layers) -> (N_time, N_layers)
-        phase_doppler_matrix = np.exp(-2j * np.pi * self.p.time_axis[:, np.newaxis] * freq_shifts[np.newaxis, :])
+        phase_doppler_matrix = np.exp(
+            -2j * np.pi * self.time_diff * freq_shifts[np.newaxis, :]
+        )
 
         # 6. 信号积分 (相干叠加)
         # Signal = Sum_over_m ( E_T(t, m) * Km(m) * Phase_Doppler(t, m) )
