@@ -6,7 +6,6 @@ from A_lidar_params import params
 from C_lidar_physics import LidarPhysics
 from D_noise_model_fixed import NoiseModel
 from E_wind_field import WindField
-import S_plot_style as plot_style
 
 
 class LidarSimulator:
