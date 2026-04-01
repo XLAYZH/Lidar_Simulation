@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import quad
 from A_lidar_params import params  # 导入参数模块
-import S_plot_style as plot_style
+import PlotStyle
 
 
 class AtmosphereModel:
@@ -94,23 +94,32 @@ if __name__ == "__main__":
     a_mol, a_aer, a_tot, _, _, _ = atmo.calculate_coefficients(h_plot_m)
 
     # 3. 绘图
-    plt.figure(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(6, 6))
 
     # 垂直高度 (km)
     h_axis_km = h_plot_m / 1000.0
 
-    plt.plot(a_mol, h_axis_km, label='Molecular', color='orange', linewidth=1)
-    plt.plot(a_aer, h_axis_km, label='Aerosol', color='green', linewidth=1)
-    plt.plot(a_tot, h_axis_km, label='Atmosphere', color='blue', linewidth=1, linestyle='--')
+    ax.plot(a_mol, h_axis_km, label='Molecules', color='orange', linewidth=1)
+    ax.plot(a_aer, h_axis_km, label='Aerosols', color='green', linewidth=1)
+    ax.plot(a_tot, h_axis_km, label='Atmosphere (Total)', color='blue', linewidth=1, linestyle='--')
 
-    plt.xscale('log')  # X轴对数坐标
-    plt.xlim(1e-6, 1e-1)  # 设置X轴范围
-    plt.ylim(0, 30)  # 设置Y轴范围
+    ax.set_xscale('log')  # X轴对数坐标
+    ax.set_xlim(1e-6, 1e-1)  # 设置X轴范围
+    ax.set_ylim(0, 30)  # 设置Y轴范围
 
-    plt.xlabel("消光系数 ($km^{-1}$)", fontproperties=plot_style.style.zh_font)
-    plt.ylabel("高度 ($km$)", fontproperties=plot_style.style.zh_font)
-    plt.title("大气分子、气溶胶及总消光系数廓线", fontproperties=plot_style.style.zh_font)
-    plt.legend()
+    ax.set_xlabel("Extinction Coefficient ($km^{-1}$)")
+    ax.set_ylabel("Height ($km$)")
+    ax.set_title("Extinction Coefficient of Molecules, Aerosols and Total")
+    ax.legend(prop={'family': 'Times New Roman'})
+
+    PlotStyle.set_axis(ax,
+                       xminor=True,  # 自动次刻度
+                       yminor=True,
+                       axis_lw=1.2,  # 轴线宽度
+                       ticklabel_fontsize=11,  # 刻度字体
+                       font_name = 'Times New Roman',  # 设置字体
+                       label_fontsize = 12,  # 轴标签字体
+                       title_fontsize = 14)
 
     print("AtmosphereModel 验证完成。")
     plt.show()
@@ -118,7 +127,7 @@ if __name__ == "__main__":
     # ==========================================
     # 新增：绘制大气透过率随高度变化曲线 (单程 & 双程)
     # ==========================================
-    plt.figure(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(6, 6))
 
     # 1. 计算光学厚度 (Optical Depth, tau)
     # 公式: tau(z) = integral(alpha(h) dh)
@@ -137,18 +146,27 @@ if __name__ == "__main__":
     transmittance_twoway = np.exp(-2 * optical_depth)
 
     # 3. 绘图
-    plt.plot(transmittance_oneway, h_axis_km, label='单程透过率 ($T$)', color='purple', linewidth=1.5)
-    plt.plot(transmittance_twoway, h_axis_km, label='双程透过率 ($T^2$)', color='darkred', linewidth=1.5,
+    ax.plot(transmittance_oneway, h_axis_km, label='One-way ($T$)', color='purple', linewidth=1.5)
+    ax.plot(transmittance_twoway, h_axis_km, label='Two-way ($T^2$)', color='darkred', linewidth=1.5,
              linestyle='--')
 
     # 4. 设置样式
-    plt.xlabel("大气透过率 (归一化)", fontproperties=plot_style.style.zh_font)
-    plt.ylabel("高度 ($km$)", fontproperties=plot_style.style.zh_font)
-    plt.title("大气垂直透过率随高度变化", fontproperties=plot_style.style.zh_font)
+    ax.set_xlabel("Transmittance (Normalized)")
+    ax.set_ylabel("Height ($km$)")
+    ax.set_title("Vertical Transmittance Profile")
 
-    plt.xlim(0.8, 1.0)  # 透过率在 0~1 之间
-    plt.ylim(0, 30)  # 高度 0~30 km
-    plt.legend(prop=plot_style.style.zh_font)  # 确保图例中文正常显示
+    ax.set_xlim(0.8, 1.0)  # 透过率在 0~1 之间
+    ax.set_ylim(0, 30)  # 高度 0~30 km
+    ax.legend(prop={'family': 'Times New Roman'})  # 确保图例中文正常显示
+
+    PlotStyle.set_axis(ax,
+                       xminor=0.05,
+                       yminor=True,
+                       axis_lw=1.2,  # 轴线宽度
+                       ticklabel_fontsize=11,  # 刻度字体
+                       font_name='Times New Roman',  # 设置字体
+                       label_fontsize=12,  # 轴标签字体
+                       title_fontsize=14)
 
     print("大气透过率图表已生成。")
     plt.show()

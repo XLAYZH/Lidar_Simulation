@@ -61,7 +61,31 @@ def set_axis(ax,xminor=False,yminor=False,**kwargs):
         yticklabel_fontsize : fontsize of yticklabel
         yticklabel_weight   : weight of yticklabel
         axis_lw             : linewidth of axis.
+        font_family         : font family name (e.g., 'serif', 'sans-serif')
+        font_name           : specific font name (e.g., 'Times New Roman')
+        label_fontsize      : fontsize of axis labels
+        title_fontsize      : fontsize of axis title
     '''
+    # 设置字体名称
+    if 'font_name' in kwargs:
+        font_name = kwargs['font_name']
+
+        # 设置刻度标签字体
+        for label in ax.get_xticklabels():
+            label.set_fontname(font_name)
+        for label in ax.get_yticklabels():
+            label.set_fontname(font_name)
+
+        # 设置轴标签字体
+        if ax.xaxis.label:
+            ax.xaxis.label.set_fontname(font_name)
+        if ax.yaxis.label:
+            ax.yaxis.label.set_fontname(font_name)
+
+        # 设置标题字体
+        if ax.title:
+            ax.title.set_fontname(font_name)
+
     if xminor:
         try:
             if str(xminor)!='True':
@@ -194,6 +218,18 @@ def set_axis(ax,xminor=False,yminor=False,**kwargs):
         for label in ax.get_yticklabels():
             label.set_weight(yticklabel_weight)
 
+    if 'label_fontsize' in kwargs:
+        label_fontsize = kwargs['label_fontsize']
+        if ax.xaxis.label:
+            ax.xaxis.label.set_fontsize(label_fontsize)
+        if ax.yaxis.label:
+            ax.yaxis.label.set_fontsize(label_fontsize)
+
+    if 'title_fontsize' in kwargs:
+        title_fontsize = kwargs['title_fontsize']
+        if ax.title:
+            ax.title.set_fontsize(title_fontsize)
+
     if 'axis_lw' in kwargs:
         axis_lw = kwargs['axis_lw']
         for axis in ['top','bottom','left','right']:
@@ -203,5 +239,21 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     fig = plt.figure(figsize=(16,9))
     ax = plt.gca()
-    set_axis(ax,xminor=0.15,yminor=0.05,axis_lw=3,minor_width=3,minor_length=5,major_length=10,major_width=3)
+    # ax.plot([1,2,3,4,5],[1,4,9,16,25])
+    ax.set_xlabel('X Axis Label')
+    ax.set_ylabel('Y Axis Label')
+    ax.set_title('Title with Times New Roman Font')
+    set_axis(ax,
+             xminor=0.15,
+             yminor=0.05,
+             axis_lw=1.5,
+             minor_width=1.5,
+             minor_length=5,
+             major_length=8,
+             major_width=1.5,
+             font_name='Times New Roman',
+             font_family='serif',
+             ticklabel_fontsize=12,
+             label_fontsize=14,
+             title_fontsize=16)
     plt.show()

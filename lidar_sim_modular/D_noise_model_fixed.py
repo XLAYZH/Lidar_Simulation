@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 from tqdm import tqdm
 
 from A_lidar_params import params
-import S_plot_style as plot_style
+import PlotStyle
 
 
 class NoiseModel:
@@ -400,13 +400,33 @@ class NoiseModel:
         fig1 = plt.figure(figsize=(10, 10))
         ax1 = fig1.add_subplot(111)
         ax1.plot(t_axis_ns, noise_shot, color='brown', lw=0.8)
-        plot_style.style.apply_standard_layout(fig1, ax1, title="散粒噪声", xlabel="时间 (ns)", ylabel="电流 ($\u00B5 A$)")
+        ax1.set_title("Shot Noise")
+        ax1.set_xlabel("Time (ns)")
+        ax1.set_ylabel("Current ($\\mu A$)")
+        PlotStyle.set_axis(ax1,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax1.set_xlim(0, t_axis_ns[-1])
 
         fig2 = plt.figure(figsize=(10, 10))
         ax2 = fig2.add_subplot(111)
         ax2.plot(t_axis_ns, noise_therm, color='orange', lw=0.8)
-        plot_style.style.apply_standard_layout(fig2, ax2, title="热噪声", xlabel="时间 (ns)", ylabel="电流 ($\u00B5 A$)")
+        ax2.set_title("Thermal Noise")
+        ax2.set_xlabel("Time (ns)")
+        ax2.set_ylabel("Current ($\\mu A$)")
+        PlotStyle.set_axis(ax2,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax2.set_xlim(0, t_axis_ns[-1])
 
         plt.show()
@@ -420,13 +440,33 @@ class NoiseModel:
         fig3 = plt.figure(figsize=(10, 10))
         ax3 = fig3.add_subplot(111)
         ax3.semilogx(f_plot_mhz, rin_db_high, color='red')
-        plot_style.style.apply_standard_layout(fig3, ax3, title="RIN 频率特性", xlabel="频率 (MHz)", ylabel="RIN (dB/Hz)")
+        ax3.set_title("RIN Frequency Characteristics")
+        ax3.set_xlabel("Frequency (MHz)")
+        ax3.set_ylabel("RIN (dB/Hz)")
+        PlotStyle.set_axis(ax3,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax3.set_xlim(0.1, 100)
 
         fig4 = plt.figure(figsize=(10, 10))
         ax4 = fig4.add_subplot(111)
         ax4.semilogx(f_plot_mhz, rin_psd_high, color='red')
-        plot_style.style.apply_standard_layout(fig4, ax4, title="RIN 功率谱密度", xlabel="频率 (MHz)", ylabel="PSD ($A^2/Hz$)")
+        ax4.set_title("RIN Power Spectral Density")
+        ax4.set_xlabel("Frequency (MHz)")
+        ax4.set_ylabel("PSD ($A^2/Hz$)")
+        PlotStyle.set_axis(ax4,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax4.set_xlim(0.1, 100)
 
         plt.show()
@@ -440,13 +480,33 @@ class NoiseModel:
         fig5 = plt.figure(figsize=(10, 10))
         ax5 = fig5.add_subplot(111)
         ax5.plot(f_axis_std_mhz, receiver_resp, color='blue')
-        plot_style.style.apply_standard_layout(fig5, ax5, title="Thorlabs PDB460C平衡探测器带宽响应", xlabel="频率 (MHz)", ylabel="归一化响应")
+        ax5.set_title("Thorlabs PDB460C Balanced Detector Bandwidth Response")
+        ax5.set_xlabel("Frequency (MHz)")
+        ax5.set_ylabel("Normalized Response")
+        PlotStyle.set_axis(ax5,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax5.set_xlim(0, 500)
 
         fig6 = plt.figure(figsize=(10, 10))
         ax6 = fig6.add_subplot(111)
         ax6.plot(f_axis_std_mhz, nep_psd_std, color='red')
-        plot_style.style.apply_standard_layout(fig6, ax6, title="BDN 功率谱密度", xlabel="频率 (MHz)", ylabel="PSD ($A^2/Hz$)")
+        ax6.set_title("BDN Power Spectral Density")
+        ax6.set_xlabel("Frequency (MHz)")
+        ax6.set_ylabel("PSD ($A^2/Hz$)")
+        PlotStyle.set_axis(ax6,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax6.set_xlim(0, 500)
 
         plt.show()
@@ -461,13 +521,33 @@ class NoiseModel:
         fig7 = plt.figure(figsize=(10, 10))
         ax7 = fig7.add_subplot(111)
         ax7.plot(t_axis_ns, n_rin, color='teal', lw=0.8)
-        plot_style.style.apply_standard_layout(fig7, ax7, title="相对强度噪声", xlabel="时间 (ns)", ylabel="电流 ($\u00B5 A$)")
+        ax7.set_title("Relative Intensity Noise")
+        ax7.set_xlabel("Time (ns)")
+        ax7.set_ylabel("Current ($\\mu A$)")
+        PlotStyle.set_axis(ax7,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax7.set_xlim(0, t_axis_ns[-1])
 
         fig8 = plt.figure(figsize=(10, 10))
         ax8 = fig8.add_subplot(111)
         ax8.plot(t_axis_ns, n_nep, color='steelblue', lw=0.8)
-        plot_style.style.apply_standard_layout(fig8, ax8, title="平衡探测器噪声", xlabel="时间 (ns)", ylabel="电流 ($\u00B5 A$)")
+        ax8.set_title("Balanced Detector Noise")
+        ax8.set_xlabel("Time (ns)")
+        ax8.set_ylabel("Current ($\\mu A$)")
+        PlotStyle.set_axis(ax8,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax8.set_xlim(0, t_axis_ns[-1])
 
         plt.show()
@@ -521,35 +601,75 @@ class NoiseModel:
         for k, acc in enumerate(acc_list):
             ax9.plot(f_axis_std_mhz, psd_avg_shot[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
         ax9.plot(f_axis_std_mhz, shot_psd_std, 'k--', lw=1.2, label='Theoretical PSD')
-        plot_style.style.apply_standard_layout(fig9, ax9, title="散粒噪声累积功率谱密度", xlabel="频率 (MHz)", ylabel="PSD ($A^2/Hz$)")
+        ax9.set_title("Shot Noise Accumulated PSD")
+        ax9.set_xlabel("Frequency (MHz)")
+        ax9.set_ylabel("PSD ($A^2/Hz$)")
+        PlotStyle.set_axis(ax9,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax9.set_xlim(0, 500)
-        ax9.legend()
+        ax9.legend(prop={'family': 'Times New Roman', 'size': 11})
 
         fig10 = plt.figure(figsize=(10, 10))
         ax10 = fig10.add_subplot(111)
         for k, acc in enumerate(acc_list):
             ax10.plot(f_axis_std_mhz, psd_avg_therm[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
         ax10.plot(f_axis_std_mhz, thermal_psd_std, 'k--', lw=1.2, label='Theoretical PSD')
-        plot_style.style.apply_standard_layout(fig10, ax10, title="热噪声累积功率谱密度", xlabel="频率 (MHz)", ylabel="PSD ($A^2/Hz$)")
+        ax10.set_title("Thermal Noise Accumulated PSD")
+        ax10.set_xlabel("Frequency (MHz)")
+        ax10.set_ylabel("PSD ($A^2/Hz$)")
+        PlotStyle.set_axis(ax10,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax10.set_xlim(0, 500)
-        ax10.legend()
+        ax10.legend(prop={'family': 'Times New Roman', 'size': 11})
 
         fig11 = plt.figure(figsize=(10, 10))
         ax11 = fig11.add_subplot(111)
         for k, acc in enumerate(acc_list):
             ax11.plot(f_axis_std_mhz, psd_avg_rin[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
-        plot_style.style.apply_standard_layout(fig11, ax11, title="RIN 累积功率谱密度", xlabel="频率 (MHz)", ylabel="PSD ($A^2/Hz$)")
+        ax11.set_title("RIN Accumulated PSD")
+        ax11.set_xlabel("Frequency (MHz)")
+        ax11.set_ylabel("PSD ($A^2/Hz$)")
+        PlotStyle.set_axis(ax11,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax11.set_xlim(0, 500)
         ax11.set_ylim(0, 8e-24)
-        ax11.legend()
+        ax11.legend(prop={'family': 'Times New Roman', 'size': 11})
 
         fig12 = plt.figure(figsize=(10, 10))
         ax12 = fig12.add_subplot(111)
         for k, acc in enumerate(acc_list):
             ax12.plot(f_axis_std_mhz, psd_avg_nep[k], label=f'N={acc}', color=colors[k], lw=linewidths[k], alpha=alphas[k])
-        plot_style.style.apply_standard_layout(fig12, ax12, title="BDN 累积功率谱密度", xlabel="频率 (MHz)", ylabel="PSD ($A^2/Hz$)")
+        ax12.set_title("BDN Accumulated PSD")
+        ax12.set_xlabel("Frequency (MHz)")
+        ax12.set_ylabel("PSD ($A^2/Hz$)")
+        PlotStyle.set_axis(ax12,
+                           xminor=True,
+                           yminor=True,
+                           axis_lw=1.0,
+                           ticklabel_fontsize=11,
+                           font_name='Times New Roman',
+                           label_fontsize=12,
+                           title_fontsize=14)
         ax12.set_xlim(0, 500)
-        ax12.legend()
+        ax12.legend(prop={'family': 'Times New Roman', 'size': 11})
 
         plt.show()
         print("所有图表绘制完成。")

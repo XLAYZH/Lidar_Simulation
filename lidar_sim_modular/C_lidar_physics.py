@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from A_lidar_params import params
 from B_atmosphere_model import AtmosphereModel
-import S_plot_style as plot_style
+import PlotStyle
 
 
 class LidarPhysics:
@@ -105,12 +105,21 @@ if __name__ == "__main__":
     # ==========================================
     t_axis, p_profile = physics.get_pulse_power_profile()
 
-    plt.figure(figsize=(8, 5))
-    plt.plot(t_axis * 1e9, p_profile, color='tab:red')
-    plt.xlabel("时间 ($ns$)", fontproperties=plot_style.style.zh_font)
-    plt.ylabel("功率 ($W$)", fontproperties=plot_style.style.zh_font)
-    plt.title("高斯脉冲时域分布模型", fontproperties=plot_style.style.zh_font)
-    plt.xlim(-1000, 1000)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(t_axis * 1e9, p_profile, color='tab:red')
+    ax.set_xlabel("Time ($ns$)")
+    ax.set_ylabel("Power ($W$)")
+    ax.set_title("Gaussian Pulse Time-domain Model")
+    ax.set_xlim(-1000, 1000)
+    PlotStyle.set_axis(ax,
+                       xminor=True,  # 自动次刻度
+                       yminor=True,
+                       axis_lw=1.2,  # 轴线宽度
+                       ticklabel_fontsize=11,  # 刻度字体
+                       font_name='Times New Roman',  # 设置字体
+                       label_fontsize=12,  # 轴标签字体
+                       title_fontsize=14)
+
     plt.show()
 
     # ==========================================
@@ -138,9 +147,17 @@ if __name__ == "__main__":
     # linewidth 设细一点，以便看清高频震荡的包络
     ax.plot(dist_axis, i_h_uA, color='blue', linewidth=0.3)
 
-    ax.set_xlabel("距离 ($m$)", fontproperties=plot_style.style.zh_font)
-    ax.set_ylabel("外差信号 ($\u00B5 A$)", fontproperties=plot_style.style.zh_font)  # 单位改为 uA
-    ax.set_title("时域外差电流信号", fontproperties=plot_style.style.zh_font)
+    ax.set_xlabel("Distance ($m$)")
+    ax.set_ylabel("Heterodyne Current ($\u00B5 A$)")  # 单位改为 uA
+    ax.set_title("Time-domain Heterodyne Current Signal")
+    PlotStyle.set_axis(ax,
+                       xminor=True,  # 自动次刻度
+                       yminor=True,
+                       axis_lw=1.2,  # 轴线宽度
+                       ticklabel_fontsize=11,  # 刻度字体
+                       font_name='Times New Roman',  # 设置字体
+                       label_fontsize=12,  # 轴标签字体
+                       title_fontsize=14)
 
     ax.set_xlim(0, 4000)
     ax.set_ylim(-ylim_val, ylim_val)  # 动态设置范围，确保波形充满画面
@@ -155,6 +172,14 @@ if __name__ == "__main__":
     ax_ins.plot(dist_axis[idx_s:idx_e], i_h_uA[idx_s:idx_e], color='blue', linewidth=0.5)
     # ax_ins.set_title("960m - 1140m 细节", fontproperties=zh_font, fontsize=10)
     ax_ins.grid(True, alpha=0.3)
+    PlotStyle.set_axis(ax_ins,
+                       xminor=True,  # 自动次刻度
+                       yminor=True,
+                       axis_lw=1.2,  # 轴线宽度
+                       ticklabel_fontsize=11,  # 刻度字体
+                       font_name='Times New Roman',  # 设置字体
+                       label_fontsize=12,  # 轴标签字体
+                       title_fontsize=14)
 
     # plt.tight_layout()
     plt.show()

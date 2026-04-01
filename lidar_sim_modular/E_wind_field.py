@@ -1,218 +1,278 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional, Tuple
+
 import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
 from scipy.interpolate import interp1d
-import os
-import glob
-import random
 
 from A_lidar_params import params
-import S_plot_style as plot_style
 
 
 class WindField:
     """
-    风场生成模块 (包含三种理论模型 + 真实数据插值)
+    风场模块（精简版）
+
+    仅保留两种主模式：
+    1. constant : 常风速调试模式
+    2. profile  : 由标准化 npz 风廓线驱动
+
+    约定：
+    - profile 文件由 sonde_csv_to_npz.py 预处理生成
+    - npz 中至少包含：height_m, u_mps, v_mps, w_mps
+    - 若 w_mps 为 NaN，则在仿真时按 0 处理
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.p = params
-        self.real_profile = None
+        self.profile_path: Optional[Path] = None
+        self.profile_loaded: bool = False
 
+        self.height_profile: Optional[np.ndarray] = None
+        self.u_profile: Optional[np.ndarray] = None
+        self.v_profile: Optional[np.ndarray] = None
+        self.w_profile: Optional[np.ndarray] = None
 
-    def load_sounding_data(self, csv_path):
-        """加载探空 CSV 数据并构建插值函数"""
-        if not os.path.exists(csv_path):
-            print(f"[Error] 文件不存在: {csv_path}")
-            self.real_profile = None
-            return
+        self.u_interp = None
+        self.v_interp = None
+        self.w_interp = None
+
+    # ---------------------------------------------------------------------
+    # Profile loading
+    # ---------------------------------------------------------------------
+    def load_profile_npz(self, npz_path: str | Path) -> bool:
+        """加载标准化探空 npz，并构建插值器。"""
+        path = Path(npz_path)
+        if not path.exists():
+            print(f"[Error] 风廓线文件不存在: {path}")
+            self.profile_loaded = False
+            return False
 
         try:
-            # 读取 CSV (自动处理分隔符)
-            df = pd.read_csv(csv_path, sep=None, engine='python', header=0)
-            df.columns = df.columns.str.strip()  # 清洗列名空格
+            data = np.load(path, allow_pickle=True)
 
-            required_cols = ['HGHT', 'SPED', 'DRCT']
-            if not all(col in df.columns for col in required_cols):
-                print(f"[Error] 缺少列: {required_cols}")
-                self.real_profile = None
-                return
+            required = ["height_m", "u_mps", "v_mps", "w_mps"]
+            missing = [k for k in required if k not in data.files]
+            if missing:
+                raise KeyError(f"缺少必要字段: {missing}")
 
-            # 转数值
-            for col in required_cols:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            df.dropna(subset=required_cols, inplace=True)
+            height = np.asarray(data["height_m"], dtype=float)
+            u = np.asarray(data["u_mps"], dtype=float)
+            v = np.asarray(data["v_mps"], dtype=float)
+            w = np.asarray(data["w_mps"], dtype=float)
 
-            z_real = df['HGHT'].values
-            speed_real = df['SPED'].values
-            dir_real = df['DRCT'].values
+            valid = ~np.isnan(height)
+            height = height[valid]
+            u = u[valid]
+            v = v[valid]
+            w = w[valid]
 
-            # 风向转 UV
-            dir_rad = np.radians(dir_real)
-            u_real = -speed_real * np.sin(dir_rad)
-            v_real = -speed_real * np.cos(dir_rad)
+            # w 缺测按 0 处理
+            w = np.where(np.isnan(w), 0.0, w)
 
-            # 创建插值
-            self.u_interp = interp1d(z_real, u_real, kind='linear', bounds_error=False, fill_value="extrapolate")
-            self.v_interp = interp1d(z_real, v_real, kind='linear', bounds_error=False, fill_value="extrapolate")
+            # 对 u,v,w 的缺失值进行同步剔除
+            valid_uv = ~(np.isnan(u) | np.isnan(v) | np.isnan(w))
+            height = height[valid_uv]
+            u = u[valid_uv]
+            v = v[valid_uv]
+            w = w[valid_uv]
 
-            self.real_profile = True
-            print(f"[Success] 已加载: {os.path.basename(csv_path)}")
+            if height.size < 2:
+                raise ValueError("有效风廓线点数不足，至少需要 2 个高度点。")
 
-        except Exception as e:
-            print(f"[Error] 解析失败: {e}")
-            self.real_profile = None
+            order = np.argsort(height)
+            height = height[order]
+            u = u[order]
+            v = v[order]
+            w = w[order]
 
-    def get_power_law_profile(self, heights, u_ref=10.0, z_ref=100.0, alpha=0.2):
-        """指数律模型"""
-        valid_h = np.maximum(heights, 1e-3)
-        return u_ref * (valid_h / z_ref) ** alpha
+            # 去重：相同高度保留首个
+            _, unique_idx = np.unique(height, return_index=True)
+            height = height[unique_idx]
+            u = u[unique_idx]
+            v = v[unique_idx]
+            w = w[unique_idx]
 
-    def get_hybrid_profile(self, heights, u_ref=10.0):
-        """
-        三段式混合模型:
-        1. 0~300m: 指数律 (强切变)
-        2. 300~1500m: 线性过渡
-        3. >1500m: 自由大气 (梯度 + 微扰)
-        """
-        h_surface = 300.0
-        h_free = 1500.0
-        v_300 = u_ref * (300.0 / 100.0) ** 0.2
-        v_free_base = 15.0
+            self.height_profile = height
+            self.u_profile = u
+            self.v_profile = v
+            self.w_profile = w
+            self.profile_path = path
 
-        profile = np.zeros_like(heights)
+            self.u_interp = interp1d(
+                height, u, kind="linear", bounds_error=False,
+                fill_value=(u[0], u[-1])
+            )
+            self.v_interp = interp1d(
+                height, v, kind="linear", bounds_error=False,
+                fill_value=(v[0], v[-1])
+            )
+            self.w_interp = interp1d(
+                height, w, kind="linear", bounds_error=False,
+                fill_value=(w[0], w[-1])
+            )
 
-        # 第一段
-        mask1 = heights < h_surface
-        h_safe = np.maximum(heights[mask1], 1e-3)
-        profile[mask1] = u_ref * (h_safe / 100.0) ** 0.2
+            self.profile_loaded = True
+            print(f"[Success] 已加载风廓线: {path.name}")
+            return True
 
-        # 第二段
-        mask2 = (heights >= h_surface) & (heights < h_free)
-        if np.any(mask2):
-            slope = (v_free_base - v_300) / (h_free - h_surface)
-            profile[mask2] = v_300 + slope * (heights[mask2] - h_surface)
+        except Exception as exc:
+            print(f"[Error] 加载风廓线失败: {exc}")
+            self.profile_loaded = False
+            return False
 
-        # 第三段
-        mask3 = heights >= h_free
-        if np.any(mask3):
-            free_shear_slope = 2.0 / 1000.0
-            base_wind = v_free_base + free_shear_slope * (heights[mask3] - h_free)
-            wave_perturbation = 1.0 * np.sin(2 * np.pi * (heights[mask3] - h_free) / 2000.0)
-            profile[mask3] = base_wind + wave_perturbation
-
-        return profile
-
-    def get_wind_vector_field(self, heights, wind_type='hybrid'):
-        """生成三维风矢量 (u, v, w)"""
-        u = np.zeros_like(heights)
-        v = np.zeros_like(heights)
-        w = np.zeros_like(heights)
-
-        if wind_type == 'real':
-            if self.real_profile:
-                u = self.u_interp(heights)
-                v = self.v_interp(heights)
-            else:
-                v = self.get_hybrid_profile(heights)  # 回退
-
-        elif wind_type == 'power_law':
-            v = self.get_power_law_profile(heights)
-        elif wind_type == 'hybrid':
-            v = self.get_hybrid_profile(heights)
-        elif wind_type == 'constant':
-            v = np.full_like(heights, 10.0)
-        else:
-            v = self.get_hybrid_profile(heights)
-
+    # ---------------------------------------------------------------------
+    # Wind vector field
+    # ---------------------------------------------------------------------
+    def get_constant_profile(
+        self,
+        heights: np.ndarray,
+        *,
+        u_const: float = 0.0,
+        v_const: float = 10.0,
+        w_const: float = 0.0,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """常风速调试模式。"""
+        heights = np.asarray(heights, dtype=float)
+        u = np.full_like(heights, u_const, dtype=float)
+        v = np.full_like(heights, v_const, dtype=float)
+        w = np.full_like(heights, w_const, dtype=float)
         return u, v, w
 
-    def get_radial_velocity(self, range_axis, azimuth_deg, elevation_deg, wind_type='hybrid'):
-        """计算视线方向径向风速"""
-        el_rad = np.radians(elevation_deg)
-        az_rad = np.radians(azimuth_deg)
+    def get_profile_wind_field(self, heights: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """由标准化风廓线插值得到 u, v, w。"""
+        if not self.profile_loaded:
+            raise RuntimeError("尚未加载 profile npz，请先调用 load_profile_npz().")
+
+        heights = np.asarray(heights, dtype=float)
+        u = np.asarray(self.u_interp(heights), dtype=float)
+        v = np.asarray(self.v_interp(heights), dtype=float)
+        w = np.asarray(self.w_interp(heights), dtype=float)
+        return u, v, w
+
+    def get_wind_vector_field(
+        self,
+        heights: np.ndarray,
+        wind_type: str = "constant",
+        *,
+        profile_path: str | Path | None = None,
+        u_const: float = 0.0,
+        v_const: float = 10.0,
+        w_const: float = 0.0,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        根据 wind_type 返回三维风矢量 (u, v, w)。
+
+        参数
+        ----
+        wind_type:
+            - 'constant': 常风速
+            - 'profile' : 风廓线驱动
+        profile_path:
+            当 wind_type='profile' 时，若提供且与当前已加载文件不同，则自动加载
+        """
+        heights = np.asarray(heights, dtype=float)
+
+        if wind_type == "constant":
+            return self.get_constant_profile(
+                heights,
+                u_const=u_const,
+                v_const=v_const,
+                w_const=w_const,
+            )
+
+        if wind_type == "profile":
+            if profile_path is not None:
+                profile_path = Path(profile_path)
+                if (not self.profile_loaded) or (self.profile_path != profile_path):
+                    ok = self.load_profile_npz(profile_path)
+                    if not ok:
+                        raise RuntimeError(f"无法加载风廓线文件: {profile_path}")
+            return self.get_profile_wind_field(heights)
+
+        raise ValueError(f"不支持的 wind_type: {wind_type}. 仅支持 'constant' 或 'profile'.")
+
+    # ---------------------------------------------------------------------
+    # Radial velocity
+    # ---------------------------------------------------------------------
+    def get_radial_velocity(
+        self,
+        range_axis: np.ndarray,
+        azimuth_deg: float,
+        elevation_deg: float,
+        wind_type: str = "constant",
+        *,
+        profile_path: str | Path | None = None,
+        u_const: float = 0.0,
+        v_const: float = 10.0,
+        w_const: float = 0.0,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        计算视线方向径向风速。
+
+        投影公式：
+            v_r = u * sin(az) * cos(el)
+                + v * cos(az) * cos(el)
+                + w * sin(el)
+
+        返回
+        ----
+        v_r : ndarray
+            各距离门的径向风速真值
+        heights : ndarray
+            对应的几何高度
+        """
+        range_axis = np.asarray(range_axis, dtype=float)
+        el_rad = np.deg2rad(elevation_deg)
+        az_rad = np.deg2rad(azimuth_deg)
+
         heights = range_axis * np.sin(el_rad)
+        u, v, w = self.get_wind_vector_field(
+            heights,
+            wind_type=wind_type,
+            profile_path=profile_path,
+            u_const=u_const,
+            v_const=v_const,
+            w_const=w_const,
+        )
 
-        u, v, w = self.get_wind_vector_field(heights, wind_type)
-
-        # 投影公式 Eq 4.1
-        v_r = u * np.sin(az_rad) * np.cos(el_rad) + \
-              v * np.cos(az_rad) * np.cos(el_rad) + \
-              w * np.sin(el_rad)
-
-        return v_r, heights
+        v_r = (
+            u * np.sin(az_rad) * np.cos(el_rad)
+            + v * np.cos(az_rad) * np.cos(el_rad)
+            + w * np.sin(el_rad)
+        )
+        return np.asarray(v_r, dtype=float), np.asarray(heights, dtype=float)
 
 
-# =============================================================================
-# 验证绘图
-# =============================================================================
 if __name__ == "__main__":
     wf = WindField()
-    sim_h = np.linspace(0, 4000, 500)  # 0-4km
+    sim_h = np.linspace(0.0, 4000.0, 200)
 
-    # -----------------------------------------------------------
-    # 验证 1: 三种理论模型对比 (您要求新增的图)
-    # -----------------------------------------------------------
-    print("绘制图表 1: 三种风速模型对比...")
-    # 获取三种模型的风速廓线 (这里只看水平风速大小 V)
-    _, v_power, _ = wf.get_wind_vector_field(sim_h, 'power_law')
-    _, v_hybrid, _ = wf.get_wind_vector_field(sim_h, 'hybrid')
-    _, v_const, _ = wf.get_wind_vector_field(sim_h, 'constant')
+    # 1) 常风速测试
+    u_c, v_c, w_c = wf.get_wind_vector_field(sim_h, wind_type="constant")
+    print("[Test] constant 模式:")
+    print("u[:5] =", u_c[:5])
+    print("v[:5] =", v_c[:5])
+    print("w[:5] =", w_c[:5])
 
-    plt.figure(figsize=(10, 10))
-    plt.plot(v_power, sim_h, label='Power Law', linestyle='--', color='tab:green', alpha=0.7)
-    plt.plot(v_const, sim_h, label='Constant', linestyle=':', color='tab:blue', alpha=0.7)
-    plt.plot(v_hybrid, sim_h, label='Hybrid', color='tab:red', linewidth=2.5)  # 突出显示混合模型
+    # 2) profile 模式示例（按需修改路径）
+    example_npz = Path(r"E:\GraduateStu6428\Codes\Python\sonde_profiles_npz\2025-12-01_12.npz")
+    if example_npz.exists():
+        ok = wf.load_profile_npz(example_npz)
+        if ok:
+            u_p, v_p, w_p = wf.get_wind_vector_field(sim_h, wind_type="profile")
+            print("\n[Test] profile 模式:")
+            print("u[:5] =", u_p[:5])
+            print("v[:5] =", v_p[:5])
+            print("w[:5] =", w_p[:5])
 
-    # 添加分段参考线
-    plt.axhline(300, color='k', linestyle='-.', alpha=0.3)
-    plt.text(1, 300, '300m', verticalalignment='bottom', fontsize=9)
-    plt.axhline(1500, color='k', linestyle='-.', alpha=0.3)
-    plt.text(1, 1500, '1500m', verticalalignment='bottom', fontsize=9)
-
-    plot_style.style.apply_standard_layout(plt.gcf(), plt.gca(),
-                                           title="不同风廓线模型仿真水平风速对比",
-                                           xlabel="水平风速 (m/s)",
-                                           ylabel="高度 (m)")
-    plt.legend()
-    plt.show()
-
-    # -----------------------------------------------------------
-    # 验证 2: 真实数据加载测试 (如果文件存在)
-    # -----------------------------------------------------------
-    target_file = r"E:\GraduateStu6428\Codes\ObservationData54511\12Z\2025-12-01_12.csv"
-
-    print(f"\n尝试加载探空数据: {os.path.basename(target_file)}")
-    wf.load_sounding_data(target_file)
-
-    if wf.real_profile:
-        print("绘制图表 2: 真实数据 vs 混合模型...")
-        u_real, v_real, _ = wf.get_wind_vector_field(sim_h, 'real')
-        speed_real = np.sqrt(u_real ** 2 + v_real ** 2)
-
-        plt.figure(figsize=(20, 10))
-
-        # 左图：廓线对比
-        plt.subplot(1, 2, 1)
-        plt.plot(speed_real, sim_h, label='Real', color='tab:blue')
-        plt.plot(v_hybrid, sim_h, label='Hybrid', color='tab:red', linestyle='--')
-        plot_style.style.apply_standard_layout(plt.gcf(), plt.gca(),
-                                               title="真实风速 vs 仿真模型",
-                                               xlabel="风速 (m/s)", ylabel="高度 (m)")
-        plt.legend()
-
-        # 右图：风矢量轨迹
-        plt.subplot(1, 2, 2)
-        sc = plt.scatter(u_real, v_real, c=sim_h, cmap='viridis', s=15, alpha=0.8)
-        plt.colorbar(sc, label='Height (m)')
-        plt.axhline(0, color='gray', lw=0.5)
-        plt.axvline(0, color='gray', lw=0.5)
-        plot_style.style.apply_standard_layout(plt.gcf(), plt.gca(),
-                                               title="真实风矢量轨迹 (Hodograph)",
-                                               xlabel="U (m/s, East)", ylabel="V (m/s, North)")
-        plt.axis('equal')  # 保证 XY 比例一致
-
-        plt.tight_layout()
-        plt.show()
+            vr, z = wf.get_radial_velocity(
+                range_axis=np.linspace(0.0, 4000.0, 50),
+                azimuth_deg=0.0,
+                elevation_deg=params.elevation_angle_deg if hasattr(params, 'elevation_angle_deg') else 72.0,
+                wind_type="profile",
+            )
+            print("\n[Test] v_r[:5] =", vr[:5])
+            print("height[:5] =", z[:5])
     else:
-        print("未找到探空文件，跳过真实数据绘图。")
+        print(f"\n[Info] 未找到示例 profile 文件，跳过 profile 模式测试: {example_npz}")
