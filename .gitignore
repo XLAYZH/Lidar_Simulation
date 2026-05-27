@@ -1,64 +1,25 @@
-    # Byte-compiled / optimized / DLL files
-    __pycache__/
-    *.py[cod]
-    *$py.class
+# Python 虚拟环境
+.venv/
 
-    # C extensions
-    *.so
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
 
-    # Distribution / packaging
-    .Python
-    build/
-    develop-eggs/
-    dist/
-    downloads/
-    eggs/
-    .eggs/
-    lib/
-    lib64/
-    parts/
-    sdist/
-    var/
-    wheels/
-    pip-wheel-metadata/
-    share/python-wheels/
-    *.egg-info/
-    .installed.cfg
-    *.egg
-    MANIFEST
+# PyCharm IDE 配置
+.idea/
 
-    # PyInstaller
-    #  Usually these files are written by a python script from a template
-    #  before PyInstaller builds the exe, so as to inject date/other infos into it.
-    *.manifest
-    *.spec
+# 运行结果目录（数据文件、图片、Excel 等）
+inversion_results/
+los_velocity_and_snr/
+los_velocity_and_snr_yanmo/
+wind_vector_results/
+wind_vector_results_snr_qc/
 
-    # Installer logs
-    pip-log.txt
-    pip-delete-this-directory.txt
-
-    # Unit test / coverage reports
-    htmlcov/
-    .tox/
-    .nox/
-    .coverage
-    .coverage.*
-    .cache
-    nosetests.xml
-    coverage.xml
-    *.cover
-    .hypothesis/
-    .pytest_cache/
-
-    # Environments
-    .env
-    .venv
-    env/
-    venv/
-    ENV/
-    env.bak/
-    venv.bak/
-
-    # IDEs
-    .idea/
-    .vscode/
+# 数据文件
+*.npz
+*.xlsx
+*.png
+*.jpg
+*.h5
+*.hdf5
