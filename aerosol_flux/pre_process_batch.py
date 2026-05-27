@@ -769,9 +769,9 @@ def main():
     """
     当前阶段只需要手动修改 input_date_dir 即可切换不同天气对应的日期数据
     """
-    input_date_dir = r"E:\测风组实验数据\RawData\2024\2024_11_09"
+    input_date_dir = r"E:\测风组实验数据\RawData\2026\2026_04_20"
     output_root = r"E:\测风组实验数据\气溶胶反演\预处理"
-    failure_csv_path = r"E:\测风组实验数据\气溶胶反演\预处理\failed_files_2024-11-09.csv"
+    failure_csv_path = r"E:\测风组实验数据\气溶胶反演\预处理\failed_files_2026-04-20.csv"
 
     failed_records = batch_process_one_date_folder(
         input_date_dir=input_date_dir,
