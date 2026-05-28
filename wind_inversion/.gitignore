@@ -1,0 +1,25 @@
+# Python 虚拟环境
+.venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# PyCharm IDE 配置
+.idea/
+
+# 运行结果目录（数据文件、图片、Excel 等）
+inversion_results/
+los_velocity_and_snr/
+los_velocity_and_snr_yanmo/
+wind_vector_results/
+wind_vector_results_snr_qc/
+
+# 数据文件
+*.npz
+*.xlsx
+*.png
+*.jpg
+*.h5
+*.hdf5
