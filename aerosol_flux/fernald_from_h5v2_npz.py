@@ -591,6 +591,38 @@ def utc_seconds_to_local_datetime_index(utc_seconds: np.ndarray) -> pd.DatetimeI
     return dt_local
 
 
+def normalize_local_timestamp(value) -> pd.Timestamp:
+    """
+    Return an Asia/Shanghai timestamp from common timestamp representations.
+
+    Numeric epoch values are treated as UTC and their unit is inferred from
+    magnitude. This avoids pd.Timestamp interpreting epoch microseconds as
+    nanoseconds, which produces dates near 1970 in plot legends.
+    """
+    if isinstance(value, pd.Timestamp):
+        ts = value
+    elif isinstance(value, np.datetime64):
+        ts = pd.Timestamp(value)
+    elif np.isscalar(value) and np.issubdtype(np.asarray(value).dtype, np.number):
+        numeric_value = float(value)
+        abs_value = abs(numeric_value)
+        if abs_value >= 1e17:
+            unit = "ns"
+        elif abs_value >= 1e14:
+            unit = "us"
+        elif abs_value >= 1e11:
+            unit = "ms"
+        else:
+            unit = "s"
+        ts = pd.to_datetime(numeric_value, unit=unit, utc=True)
+    else:
+        ts = pd.Timestamp(value)
+
+    if ts.tzinfo is None:
+        return ts.tz_localize("Asia/Shanghai")
+    return ts.tz_convert("Asia/Shanghai")
+
+
 def datetime_index_to_plot_num(dt_index: pd.DatetimeIndex) -> np.ndarray:
     dt_naive = dt_index.tz_localize(None)
     return mdates.date2num(dt_naive.to_pydatetime())
@@ -753,7 +785,8 @@ def plot_target_vad16_profiles(
             linewidth=1.0, alpha=0.35, label=label,
         )
 
-    t_mean_str = pd.Timestamp(time_local_group_mean).strftime("%Y-%m-%d %H:%M:%S")
+    t_mean = normalize_local_timestamp(time_local_group_mean)
+    t_mean_str = t_mean.strftime("%Y-%m-%d %H:%M:%S")
     plt.plot(
         alpha_group_mean, height_km,
         linewidth=2.5, label=f"Mean of target VAD-16 group  {t_mean_str}",
@@ -767,6 +800,18 @@ def plot_target_vad16_profiles(
     plt.tight_layout()
     plt.savefig(out_png, dpi=300, bbox_inches="tight")
     plt.close()
+
+
+def mean_alpha_profiles(alpha_group_16: np.ndarray) -> np.ndarray:
+    """
+    Average already-inverted single-radial extinction profiles gate by gate.
+
+    This is the quantity shown as the mean in the target VAD-16 profile plot.
+    It is intentionally different from running Fernald once on an averaged
+    signal profile, because Fernald inversion is nonlinear.
+    """
+    alpha_group_16 = np.asarray(alpha_group_16, dtype=np.float64)
+    return np.nanmean(alpha_group_16, axis=0)
 
 
 def plot_single_extinction_profile(
@@ -986,7 +1031,6 @@ def process_one_npz(npz_path: str | Path, output_root: str | Path):
             group_idx = int(np.argmin(diff_ns))
 
             x_group_16 = x_group[group_idx]
-            x_group_mean = x_group_16.mean(axis=0)
             time_group_16 = pd.DatetimeIndex(time_group[group_idx])
             time_group_mean = t_group_local[group_idx]
 
@@ -997,14 +1041,6 @@ def process_one_npz(npz_path: str | Path, output_root: str | Path):
             _, beta_a_ref_group_16, _, _ = \
                 visibility_to_reference_beta_alpha_from_km(vis_group_16_km)
 
-            vis_group_mean_km = interpolate_hourly_visibility_to_times(
-                hourly_visibility_km,
-                pd.DatetimeIndex([time_group_mean]),
-            )[0]
-            _, beta_a_ref_group_mean, _, _ = \
-                visibility_to_reference_beta_alpha_from_km(np.array([vis_group_mean_km]))
-            beta_a_ref_group_mean = float(beta_a_ref_group_mean[0])
-
             beta_group_16, alpha_group_16 = invert_profiles(
                 x_profiles=x_group_16,
                 range_km=range_km,
@@ -1012,12 +1048,7 @@ def process_one_npz(npz_path: str | Path, output_root: str | Path):
                 beta_a_ref_values=beta_a_ref_group_16,
             )
 
-            beta_group_mean, alpha_group_mean = fernald_forward_single(
-                x_profile=x_group_mean,
-                range_km=range_km,
-                beta_m_profile=beta_m_profile,
-                beta_a_ref=beta_a_ref_group_mean,
-            )
+            alpha_group_mean = mean_alpha_profiles(alpha_group_16)
 
             target_group_png = out_dir / f"{date_str}_target_vad16_profiles_h5v2.png"
             plot_target_vad16_profiles(
