@@ -60,7 +60,7 @@ INPUT_NPZ_DIR = Path(r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocit
 VISIBILITY_XLSX_PATH = Path(r"F:\3220240787\DataShareClub\weather_data\beijing_weather.xlsx")
 
 # 输出根目录
-OUTPUT_ROOT = Path(r"E:\测风组实验数据\气溶胶反演\fernald_from_h5v2")
+OUTPUT_ROOT = Path(r"F:\3220240787\Aerosol_inversion\year_2024")
 
 # 可选：只处理指定的 NPZ 文件 stem（不含 _radial_wind_260514.npz 后缀）
 # 设为 None 则自动扫描 INPUT_NPZ_DIR 下所有匹配的 npz 文件
@@ -69,15 +69,15 @@ NPZ_STEM_WHITELIST: Optional[list[str]] = None
 
 # 可选目标本地时间 (UTC+8)，用于绘制目标 16 径向组图。
 # 键为日期字符串 "YYYY-MM-DD"，值为目标时刻 "YYYY-MM-DD HH:MM:SS"。
-TARGET_LOCAL_TIME_MAP: dict[str, str] = {
-    "2026-05-27": "2026-05-27 21:00:00",
-}
+# TARGET_LOCAL_TIME_MAP: dict[str, str] = {
+#     "2026-05-27": "2026-05-27 21:00:00",
+# }
 
 # 可选：指定某个时刻，绘制单条径向的气溶胶消光系数廓线。
-# 格式同 TARGET_LOCAL_TIME_MAP，系统自动取该时刻最近的一条单径向反演结果。
-SINGLE_PROFILE_TIME_MAP: dict[str, str] = {
-    "2026-05-27": "2026-05-27 21:00:00",
-}
+# # 格式同 TARGET_LOCAL_TIME_MAP，系统自动取该时刻最近的一条单径向反演结果。
+# SINGLE_PROFILE_TIME_MAP: dict[str, str] = {
+#     "2026-05-27": "2026-05-27 21:00:00",
+# }
 
 # 幕帘图中非采集时段的空白间隔阈值 (秒)
 SINGLE_GAP_THRESHOLD_SECONDS = 30.0

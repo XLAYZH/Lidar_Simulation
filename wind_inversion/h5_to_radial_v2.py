@@ -52,10 +52,10 @@ from peak_estimator import PeakFinder
 # 1. 单个 .h5 文件；
 # 2. 直接包含 .h5 文件的日期文件夹；
 # 3. 包含多个日期文件夹的父文件夹（如年份文件夹）。
-INPUT_PATH = r"E:\测风组实验数据\RawData\2026\2026_05_27"
+INPUT_PATH = r"E:\测风组实验数据\RawData\2026"
 
 # 输出目录。
-OUTPUT_DIR = r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr"
+OUTPUT_DIR = r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\year_2026"
 
 # 输出文件名前缀。设为 None 时自动使用：
 # - 单个 h5 文件：h5 文件名；
@@ -369,9 +369,14 @@ def retrieve_channel_products(spec_corr: np.ndarray, spec_raw_roi: np.ndarray, l
 def process_file(filename: str | Path):
     """
     处理单个 h5 文件：趋势反转峰区 -> 谱质心径向风速 -> SNR -> Peak Sum/Norm。
+    若文件损坏无法读取，返回 None 并打印警告。
     """
-    # print(filename)
-    P_corr, S_corr, P_raw_roi, S_raw_roi, azi_data, time = read_h5(filename)
+    try:
+        P_corr, S_corr, P_raw_roi, S_raw_roi, azi_data, time = read_h5(filename)
+    except OSError as e:
+        print(f"[跳过] 文件损坏，无法打开：{filename}")
+        print(f"       错误信息：{e}")
+        return None
 
     if PEAK_METHOD.lower() != "centroid":
         raise ValueError("当前版本仅实现 PEAK_METHOD='centroid'，即趋势反转峰区内谱质心。")
@@ -556,6 +561,12 @@ def run_one_job(output_stem: str, h5_files: list[Path]):
     print(f"h5 文件数：{len(h5_files)}")
     print("=" * 60)
 
+    # --- 断点续跑：输出已存在则跳过 ---
+    npz_path = Path(OUTPUT_DIR) / f"{output_stem}_radial_wind_260514.npz"
+    if npz_path.exists():
+        print(f"[跳过] 输出已存在，无需重复处理：{npz_path}")
+        return npz_path
+
     h5_file_strs = [str(h5_file) for h5_file in h5_files]
 
     if N_PROCESSES == 1 or len(h5_files) == 1:
@@ -578,7 +589,17 @@ def run_one_job(output_stem: str, h5_files: list[Path]):
                 )
             )
 
-    return save_outputs(results, OUTPUT_DIR, output_stem, write_excel=WRITE_EXCEL)
+    # --- 过滤掉损坏文件返回的 None ---
+    valid_results = [r for r in results if r is not None]
+    skipped = len(results) - len(valid_results)
+    if skipped > 0:
+        print(f"[警告] {output_stem}：共跳过 {skipped} 个损坏文件。")
+
+    if not valid_results:
+        print(f"[错误] {output_stem} 下所有文件均无法处理，跳过输出。")
+        return None
+
+    return save_outputs(valid_results, OUTPUT_DIR, output_stem, write_excel=WRITE_EXCEL)
 
 
 def main():

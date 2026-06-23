@@ -1,3 +1,58 @@
+# -*- coding: utf-8 -*-
+"""
+vector_wind_solver.py — 矢量风反演算法库
+
+功能
+----
+从多方向径向风速（LOS velocity）反演三维矢量风 (w, u, v)，并提供水平风速、
+垂直风速、风向等衍生量。
+
+支持的算法
+----------
++------+----------------+----------------------------------------------+
+| 方法 | 函数名         | 原理                                         |
++------+----------------+----------------------------------------------+
+| SVD  | SVD()          | 奇异值分解，直接最小二乘求解 V = A⁺·V_los    |
+| DSWF | DSWF()         | 直接求和加权拟合（仅一维分支可用）           |
+| AIR  | airSWF()       | 自适应迭代重加权，自动抑制异常径向观测       |
+| cooks| cooks()        | Cook's 距离剔除，迭代降权有影响力异常点      |
+| cooks|cooks_new()     | KNN 预剔除 + Cook's 距离迭代（推荐）         |
+| FSWF | FSWF()         | 频率函数加权拟合，优化目标函数求解           |
++------+----------------+----------------------------------------------+
+
+核心入口
+--------
+SWF(losvelocity, azimuthangle, time_data, num, key, ...)
+    统一反演入口，根据 key 参数分发到对应算法。
+    支持一维（单窗口单距离门）和二维（滑动窗口多距离门）两种输入模式。
+
+关键辅助函数
+------------
+is_continuous()             — 判断扫描窗口方位角连续性
+clean_data()                — 剔除 NaN 和无效方位角观测
+resolution_of_vector()      — 将矢量风投影回径向风速
+calculate_R_squared()       — 计算拟合优度 R²
+calculate_collinearity_diagnostics() — 共线性诊断
+
+典型调用流程
+------------
+1. 调用 SWF() 传入径向风速、方位角、时间、算法名称
+2. 内部自动完成：输入校验 → 设计矩阵构建 → 连续性判断 → 数据清洗 → 反演
+3. 返回 (V_all, hor_speed, ver_speed, wind_dir)
+
+示例
+----
+.. code-block:: python
+
+    from vector_wind_solver import SWF
+
+    V_all, hor_speed, ver_speed, wind_dir = SWF(
+        radial_velocity, azimuth_angle, time_data,
+        num=16, key='cooks', elevationangle=72,
+    )
+    # V_all[:, 0] = w (垂直), V_all[:, 1] = u, V_all[:, 2] = v
+"""
+
 import numpy as np
 from scipy.optimize import minimize
 from datetime import datetime, timedelta

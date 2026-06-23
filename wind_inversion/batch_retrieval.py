@@ -1,3 +1,47 @@
+# -*- coding: utf-8 -*-
+"""
+batch_retrieval.py — 矢量风批量反演调度器
+
+功能
+----
+读取 h5_to_radial_v2.py 输出的径向风速 NPZ 文件，对 P/S 双通道分别进行
+矢量风反演，输出包含水平风速、垂直风速、风向、U/V 分量的 Excel 文件。
+
+数据处理流程
+------------
+1. 读取 NPZ   → 加载径向风速 (radial_v_P/S) + SNR (SNR_P/S) + 方位角 + 时间
+2. 方位角校正 → 四舍五入 0.5°、360°→0°、减去系统偏置 105° 后映射 0-360°
+3. SNR QC     → ① 逐点阈值剔除（SNR < -23 dB）
+                ② 整条径向 SNR 突降检测（与局部中位数差 > 6 dB）
+4. 时间切分   → 按相邻径向时间间隔 > 10 s 切分为连续数据片段
+5. 矢量反演   → 逐片段调用 vector_wind_solver.SWF()，P/S 独立反演
+6. 输出 Excel → 每片段一个 xlsx，含 P/S 通道的风速/风向/U/V 分量
+
+可配置参数
+----------
+RADIAL_NPZ_INPUT    — 输入 NPZ 文件路径（单个文件或文件夹）
+OUTPUT_DIR          — 输出目录
+CHANNEL_METHODS     — P/S 通道反演算法选择（SVD / AIR / cooks / FSWF）
+USE_SNR_QC          — 是否启用 SNR 质量控制
+SNR_POINT_THRESHOLD_DB       — 单点 SNR 剔除阈值 (dB)
+USE_RADIAL_SNR_JUMP_QC       — 是否启用整条径向异常剔除
+RADIAL_DROP_THRESHOLD_DB     — 径向突降阈值 (dB)
+NUM_RADIALS          — 每次合成所需径向数（默认 16）
+ELEVATION_ANGLE      — 激光雷达俯仰角（默认 72°）
+AZIMUTH_OFFSET_DEG   — 系统方位偏置（默认 105°）
+
+输出文件命名
+------------
+wind_results_{日期}_{片段序号}_P-{算法}_S-{算法}.xlsx
+   - P Wind Speed / P Vertical Speed / P Wind Direction / P U  / P V
+   - S Wind Speed / S Vertical Speed / S Wind Direction / S U  / S V
+
+使用示例
+--------
+1. 修改上面的 RADIAL_NPZ_INPUT 指向目标 NPZ 文件或文件夹
+2. 修改 OUTPUT_DIR 指定输出目录
+3. 直接运行：python batch_retrieval.py
+"""
 import os
 from pathlib import Path
 import time
