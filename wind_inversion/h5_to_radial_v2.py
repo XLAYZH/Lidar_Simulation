@@ -561,11 +561,16 @@ def run_one_job(output_stem: str, h5_files: list[Path]):
     print(f"h5 文件数：{len(h5_files)}")
     print("=" * 60)
 
-    # --- 断点续跑：输出已存在则跳过 ---
+    # --- 增量处理：输出已存在且比所有输入 h5 新则跳过 ---
     npz_path = Path(OUTPUT_DIR) / f"{output_stem}_radial_wind_260514.npz"
     if npz_path.exists():
-        print(f"[跳过] 输出已存在，无需重复处理：{npz_path}")
-        return npz_path
+        npz_mtime = npz_path.stat().st_mtime
+        h5_mtimes = [h5.stat().st_mtime for h5 in h5_files]
+        if h5_mtimes and all(npz_mtime >= m for m in h5_mtimes):
+            print(f"[跳过] 输出已存在且为最新，无需重复处理：{npz_path}")
+            return npz_path
+        else:
+            print(f"[增量] 检测到新增或更新的 h5 文件，将重新处理。")
 
     h5_file_strs = [str(h5_file) for h5_file in h5_files]
 

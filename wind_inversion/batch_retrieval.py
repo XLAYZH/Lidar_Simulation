@@ -327,9 +327,12 @@ def process_npz_file(npz_path, output_root):
     """
     处理一个径向风速 npz 文件，进行 P/S 通道矢量风反演并保存结果。
     输出自动按年份子目录（year_2024 / year_2025 / year_2026）组织。
+    若输出 Excel 已存在且比输入 npz 新，则跳过。
     """
     npz_path = Path(npz_path)
     date_str = infer_date_str(npz_path)
+    p_method = CHANNEL_METHODS['P']
+    s_method = CHANNEL_METHODS['S']
 
     # 自动从父目录名提取年份子目录（如 year_2024），若无法提取则用 "misc"
     parent_name = npz_path.parent.name
@@ -339,8 +342,19 @@ def process_npz_file(npz_path, output_root):
         year_subdir = 'misc'
 
     output_dir = Path(output_root) / year_subdir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
+    # --- 增量处理：输出已存在且比输入 npz 新则跳过 ---
+    existing_outputs = list(output_dir.glob(
+        f'wind_results_{date_str}_*_P-{p_method}_S-{s_method}.xlsx'
+    ))
+    if existing_outputs:
+        npz_mtime = npz_path.stat().st_mtime
+        oldest_out_mtime = min(out.stat().st_mtime for out in existing_outputs)
+        if oldest_out_mtime >= npz_mtime:
+            print(f"[跳过] 输出已存在且为最新：{date_str}（{len(existing_outputs)} 个片段）")
+            return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
     print(f"正在处理：{npz_path}  →  输出到 {output_dir}")
 
     data = np.load(npz_path)
@@ -367,9 +381,6 @@ def process_npz_file(npz_path, output_root):
      SNR_S_splits) = split_by_time(radial_v_P, radial_v_S, azi_data, time_data, SNR_P, SNR_S)
 
     height = calculate_height()
-
-    p_method = CHANNEL_METHODS['P']
-    s_method = CHANNEL_METHODS['S']
 
     for i in tqdm(range(len(radial_v_P_splits)), desc=f"Processing {date_str}"):
         azi_data_sub = azi_data_splits[i]
