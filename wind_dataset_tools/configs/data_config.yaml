@@ -1,0 +1,25 @@
+system:
+  wavelength_m: 1.55e-6
+  elevation_deg: 72.0
+  pulse_width_s: 512e-9
+  speed_of_light_m_s: 3.0e8
+  azimuth_count_per_window: 16
+  fswf_window_size: 16
+  fswf_window_step: 1
+  range_gate_count: 57
+
+alignment:
+  tolerance_seconds: 0.1
+
+fswf:
+  sheets:
+    speed_P: P Wind Speed
+    w_P: P Vertical Speed
+    direction_P: P Wind Direction
+    u_P: P U Component
+    v_P: P V Component
+    speed_S: S Wind Speed
+    w_S: S Vertical Speed
+    direction_S: S Wind Direction
+    u_S: S U Component
+    v_S: S V Component
