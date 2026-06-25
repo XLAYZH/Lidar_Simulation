@@ -11,7 +11,7 @@ batch_retrieval.py — 矢量风批量反演调度器
 ------------
 1. 读取 NPZ   → 加载径向风速 (radial_v_P/S) + SNR (SNR_P/S) + 方位角 + 时间
 2. 方位角校正 → 四舍五入 0.5°、360°→0°、减去系统偏置 105° 后映射 0-360°
-3. SNR QC     → ① 逐点阈值剔除（SNR < -23 dB）
+3. SNR QC     → ① 逐点阈值剔除（SNR < -25 dB）
                 ② 整条径向 SNR 突降检测（与局部中位数差 > 6 dB）
 4. 时间切分   → 按相邻径向时间间隔 > 10 s 切分为连续数据片段
 5. 矢量反演   → 逐片段调用 vector_wind_solver.SWF()，P/S 独立反演
@@ -54,17 +54,22 @@ from tqdm import tqdm
 from vector_wind_solver import SWF
 
 # ============================= 常改动参数区 =============================
-# 绝对路径；既可以是单个 *_radial_wind_0325.npz 文件，也可以是包含该类 npz 的文件夹。
-RADIAL_NPZ_INPUT = r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\22deg5_radial_wind_260514.npz"
+# 输入路径列表：可以是单个文件、单个文件夹，或多个文件夹的列表。
+# 程序会收集所有路径下的 *_radial_wind_260514.npz 文件统一处理。
+RADIAL_NPZ_INPUT = [
+    r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\year_2024",
+    r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\year_2025",
+    r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\year_2026",
+]
 
-# 输出目录。每个连续数据片段输出一个 Excel。
-OUTPUT_DIR = r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\wind_vector_results"
+# 输出根目录。程序会自动按年份创建子目录（如 year_2024/、year_2025/、year_2026/）。
+OUTPUT_DIR = r"F:\3220240787\Lidar_Simulation\wind_inversion\los_velocity_and_snr\wind_vector_results\FSWF"
 
 # P、S 通道分别采用的矢量风反演算法。只改这里即可完成通道算法切换。
 # 可选：'SVD'、'AIR'、'cooks'、'FSWF'。其中 'DSWF' 仅在一维分支保留。
 CHANNEL_METHODS = {
-    'P': 'cooks',   # P 通道默认沿用原代码中的 FSWF
-    'S': 'cooks',    # S 通道默认沿用原代码中的 SVD
+    'P': 'FSWF',   # P 通道默认沿用原代码中的 FSWF
+    'S': 'FSWF',    # S 通道默认沿用原代码中的 SVD
 }
 
 # =========================
@@ -73,7 +78,7 @@ CHANNEL_METHODS = {
 USE_SNR_QC = True
 
 # 逐点SNR阈值，低于该值的“单个高度门径向风速”置为NaN
-SNR_POINT_THRESHOLD_DB = -23
+SNR_POINT_THRESHOLD_DB = -25
 
 # 是否启用整条径向异常剔除
 USE_RADIAL_SNR_JUMP_QC = True
@@ -98,29 +103,41 @@ AZIMUTH_TOLERANCE_DEG = 2.0
 MIN_VALID_AZI = 13
 
 # 并行处理 npz 文件数量。单文件处理时该值不起作用。
-N_JOBS = 1
+N_JOBS = 30
 # =======================================================================
 
 
-def collect_npz_files(input_path):
+def collect_npz_files(input_paths):
     """
-    收集径向风速 npz 文件。input_path 可以是单个 npz 文件或文件夹。
+    收集径向风速 npz 文件。
+    input_paths 可以是：
+      - 单个字符串（文件或文件夹路径）
+      - 列表/元组（多个文件或文件夹路径）
     """
-    path = Path(input_path)
-    if not path.is_absolute():
-        raise ValueError(f"RADIAL_NPZ_INPUT 必须是绝对路径：{input_path}")
-    if not path.exists():
-        raise FileNotFoundError(f"路径不存在：{input_path}")
+    if isinstance(input_paths, (str, Path)):
+        input_paths = [input_paths]
 
-    if path.is_file():
-        if path.suffix.lower() != '.npz':
-            raise ValueError(f"输入文件必须是 .npz 文件：{path}")
-        return [path]
+    all_npz_files = []
+    for input_path in input_paths:
+        path = Path(input_path)
+        if not path.is_absolute():
+            raise ValueError(f"RADIAL_NPZ_INPUT 必须是绝对路径：{input_path}")
+        if not path.exists():
+            raise FileNotFoundError(f"路径不存在：{input_path}")
 
-    npz_files = sorted(path.glob('*_radial_wind_260514.npz'))
-    if not npz_files:
-        raise FileNotFoundError(f"未在路径中找到 *_radial_wind_260514.npz：{path}")
-    return npz_files
+        if path.is_file():
+            if path.suffix.lower() != '.npz':
+                raise ValueError(f"输入文件必须是 .npz 文件：{path}")
+            all_npz_files.append(path)
+        else:
+            npz_files = sorted(path.glob('*_radial_wind_260514.npz'))
+            if not npz_files:
+                print(f"警告：未在路径中找到 *_radial_wind_260514.npz：{path}")
+            all_npz_files.extend(npz_files)
+
+    if not all_npz_files:
+        raise FileNotFoundError(f"所有输入路径中均未找到 *_radial_wind_260514.npz 文件")
+    return all_npz_files
 
 
 def infer_date_str(npz_path):
@@ -306,13 +323,25 @@ def apply_snr_qc(radial_v_P, radial_v_S, SNR_P, SNR_S):
 
     return radial_v_P, radial_v_S
 
-def process_npz_file(npz_path, output_dir):
+def process_npz_file(npz_path, output_root):
     """
     处理一个径向风速 npz 文件，进行 P/S 通道矢量风反演并保存结果。
+    输出自动按年份子目录（year_2024 / year_2025 / year_2026）组织。
     """
     npz_path = Path(npz_path)
     date_str = infer_date_str(npz_path)
-    print(f"正在处理：{npz_path}")
+
+    # 自动从父目录名提取年份子目录（如 year_2024），若无法提取则用 "misc"
+    parent_name = npz_path.parent.name
+    if parent_name.startswith('year_'):
+        year_subdir = parent_name
+    else:
+        year_subdir = 'misc'
+
+    output_dir = Path(output_root) / year_subdir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"正在处理：{npz_path}  →  输出到 {output_dir}")
 
     data = np.load(npz_path)
     radial_v_P = data['radial_v_P']
@@ -322,7 +351,7 @@ def process_npz_file(npz_path, output_dir):
     SNR_P = data['SNR_P']
     SNR_S = data['SNR_S']
 
-    # SNR QC：这里加入
+    # SNR QC
     radial_v_P, radial_v_S = apply_snr_qc(
         radial_v_P,
         radial_v_S,
@@ -338,8 +367,6 @@ def process_npz_file(npz_path, output_dir):
      SNR_S_splits) = split_by_time(radial_v_P, radial_v_S, azi_data, time_data, SNR_P, SNR_S)
 
     height = calculate_height()
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     p_method = CHANNEL_METHODS['P']
     s_method = CHANNEL_METHODS['S']
